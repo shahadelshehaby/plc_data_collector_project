@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crane Data Manager</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 28V8h24v20M4 8l4-4h16l4 4M12 8v8M10 16h4' fill='none' stroke='%23185FA5' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="top">
+  <div class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32"><path d="M4 28V8h24v20M4 8l4-4h16l4 4M13 8v9M10 17h6v3h-6z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>
+      Crane Data Manager
+    </div>
+    <div class="terms" id="terms"></div>
+    <div class="row right" style="gap:8px">
+      <span class="pill" id="pillCollector" title="Collector service"><span class="dot"></span>Collector</span>
+      <span class="pill" id="pillInflux" title="InfluxDB writes"><span class="dot"></span>InfluxDB</span>
+      <button class="bell" id="bell" title="Active alarms">🔔<span class="n hidden" id="bellN">0</span></button>
+      <button class="bell" id="mute" title="Alarm sound on/off">🔊</button>
+      <span class="clock" id="clock"></span>
+    </div>
+  </div>
+  <div id="bannerDown" class="banner down hidden"></div>
+  <div id="bannerAlarm" class="banner alarm hidden"></div>
+  <div id="bannerPending" class="banner pending hidden"></div>
+  <nav class="tabs" id="tabs">
+    <a href="#map" data-v="map">Live Map</a>
+    <a href="#status" data-v="status">Live Status</a>
+    <a href="#alarms" data-v="alarms">Alarms &amp; Events</a>
+    <a href="#dashboard" data-v="dashboard">Dashboard</a>
+    <a href="#explorer" data-v="explorer">Data Explorer</a>
+    <a href="#query" data-v="query">Query</a>
+    <a href="#export" data-v="export">Export</a>
+    <a href="#config" data-v="config">Configuration</a>
+  </nav>
+</div>
+<main class="wrap" id="view"></main>
+<aside class="drawer" id="drawer"></aside>
+<div class="toasts" id="toasts"></div>
+<script src="/static/app.js"></script>
+<script src="/static/map.js"></script>
+<script src="/static/data.js"></script>
+<script src="/static/config.js"></script>
+<script>App.start();</script>
+</body>
+</html>

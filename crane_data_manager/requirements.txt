@@ -1,0 +1,4 @@
+flask>=3.0
+waitress>=2.1
+influxdb-client>=1.40
+openpyxl>=3.1

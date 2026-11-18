@@ -1,0 +1,8 @@
+data/
+logs/
+settings.json
+influx_token.txt
+nssm.exe
+__pycache__/
+*.pyc
+tools/fake_influx_lines.txt
