@@ -91,6 +91,9 @@ def parse(text):
               if c in known]
     for m in re.finditer(r"\b(?:t|terminal\s*)([234])\b", low):
         cranes += [c for c, v in known.items() if v["terminal"] == f"T{m.group(1)}"]
+    for prog in ("retrofit", "new", "zpmc"):
+        if re.search(rf"\b{prog}\b", low) and not (prog == "new" and "new " not in low + " "):
+            cranes += [c for c, v in known.items() if (v.get("program") or "").lower() == prog]
     cranes = list(dict.fromkeys(cranes))
     cat = query.field_catalog(cranes or None)
     fields = []

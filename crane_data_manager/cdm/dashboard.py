@@ -33,10 +33,12 @@ def build(terminal=None, date=None):
     rows = []
     for c in cranes:
         st = stats.get(c["crane"], {})
-        q = quality_score(st)
+        q = quality_score(st, bool(c["enabled"]))
         rows.append({
             "crane": c["crane"], "terminal": c["terminal"], "port": c["port"], "ip": c["ip"],
-            "version": c["version_name"], "enabled": bool(c["enabled"]),
+            "version": c["version_name"], "program": c["program"],
+            "expected_program": registry.expected_program(c["crane"], c["terminal"]),
+            "enabled": bool(c["enabled"]),
             "received": st.get("received", 0), "written": st.get("written", 0),
             "dropped_ip": st.get("dropped_ip", 0), "wrong_size": st.get("wrong_size", 0),
             "active_hours": round((st.get("active_sec") or 0) / 3600, 2),
@@ -51,7 +53,8 @@ def build(terminal=None, date=None):
             by_day[w["date"]][k] += w[k] or 0
     versions = {}
     for c in cranes:
-        versions[c["version_name"] or "-"] = versions.get(c["version_name"] or "-", 0) + 1
+        k = f"{c['program']} {c['version_name']}" if c["version_name"] else "-"
+        versions[k] = versions.get(k, 0) + 1
     # coverage grid: lanes x crane numbers
     grids = {}
     for t, cfg in s["terminals"].items():
@@ -59,22 +62,25 @@ def build(terminal=None, date=None):
             continue
         reg = {c["crane"]: c for c in registry.list_cranes(t)}
         digit = t[-1]
-        n_max = max([cfg.get("cranes_per_lane", 14)] +
-                    [registry.parse_crane_id(k)["number"] for k in reg
-                     if registry.parse_crane_id(k)])
-        lanes = sorted(set(cfg["lanes"]) | {k[0] for k in reg})
+        counts = cfg.get("lane_counts") or {}
+        lanes = sorted(set(cfg["lanes"]) | {k[0] for k in reg if k[1:2] == digit})
+        lane_n = {lane: max([int(counts.get(lane, cfg.get("cranes_per_lane", 14)))] +
+                            [registry.parse_crane_id(k)["number"] for k in reg
+                             if k[0] == lane and k[1:2] == digit]) for lane in lanes}
+        n_max = max(lane_n.values() or [0])
         grid = []
         for lane in lanes:
             row = []
-            for n in range(1, n_max + 1):
+            for n in range(1, lane_n[lane] + 1):
                 cid = f"{lane}{digit}{n:02d}"
                 c = reg.get(cid)
-                row.append({"crane": cid, "status": "none" if not c else
+                row.append({"crane": cid, "program": registry.expected_program(cid, t, s),
+                            "status": "none" if not c else
                             ("collecting" if c["enabled"] else "off")})
             grid.append({"lane": lane, "cells": row})
         # cranes registered under this terminal whose ID belongs elsewhere (e.g. F209 on T4)
         extra = [k for k in reg if not k[1:2] == digit]
-        grids[t] = {"grid": grid, "extra": extra}
+        grids[t] = {"grid": grid, "extra": extra, "columns": n_max}
     q = [r["quality"] for r in rows if r["quality"] is not None]
     return {
         "date": date, "terminal": terminal,

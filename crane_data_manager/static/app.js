@@ -77,6 +77,10 @@ const App = {
     const v = (location.hash || "#map").slice(1).split("/")[0] || "map";
     $$("#tabs a").forEach(a => a.classList.toggle("on", a.dataset.v === v));
     if (v !== this.view || force || location.hash !== this.hash) {
+      const prev = this.views[this.view];
+      if (prev && prev.leave) try { prev.leave(); } catch (e) { console.error(e); }
+      document.body.classList.toggle("citymode", v === "map");
+      document.documentElement.classList.toggle("citymode", v === "map");
       this.view = v;
       this.hash = location.hash;
       const el = $("#view");
@@ -89,6 +93,17 @@ const App = {
   },
 
   onLive(fn) { this.liveListeners.push(fn); },
+
+  /* program family a crane is expected to run (Retrofit / New / ZPMC) */
+  expectedProgram(crane, terminal) {
+    const r = ((this.meta && this.meta.program_rules) || {})[terminal] || {};
+    crane = (crane || "").toUpperCase();
+    return (r.cranes || {})[crane] || (r.lanes || {})[crane[0]] || r.default || "";
+  },
+  programWhere(p) {
+    return {Retrofit: "T2 lanes A-E (A201 … E211)", New: "T2 lane F, A213, A214, Terminal 4", ZPMC: "Terminal 3"}[p] || "";
+  },
+  verLabel(c) { return c.version ? `${c.program ? c.program + " " : ""}${c.version}` : "–"; },
 
   async poll() {
     try {
@@ -291,7 +306,7 @@ const App = {
         <div><span>Terminal</span><span>${h(c.terminal)}</span></div>
         <div><span>Port</span><span>${c.port}${c.rule_warning ? ` <span class="warnicon" title="${h(c.rule_warning)}">⚠</span>` : ""}</span></div>
         <div><span>Registered IP</span><span class="mono">${h(c.ip || "– missing –")}</span></div>
-        <div><span>Version</span><span>${h(c.version_name || "–")} (${c.packet_size || "?"} B)</span></div>
+        <div><span>Program · version</span><span>${h(L.program || "")} ${h(c.version_name || "–")} (${c.packet_size || "?"} B)</span></div>
         <div><span>Writing to InfluxDB</span><span>${c.enabled ? "ON" : "OFF"}</span></div>
         <div><span>Notes</span><span>${h(c.notes || "–")}</span></div>
       </div></div>
@@ -419,7 +434,7 @@ App.views.status = {
       (!f || [c.crane, c.ip, c.port, c.version].join(" ").toLowerCase().includes(f)));
     const k = this.sort;
     rows.sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) || (a.crane > b.crane ? 1 : -1));
-    const cols = [["crane", "Crane"], ["terminal", "Term."], ["port", "Port"], ["version", "Ver"], ["state", "State"], ["pkt_min", "Pkt/min"], ["last_packet", "Last packet"], ["last_size", "Size"], ["last_src", "From"], ["written", "Written"], ["dropped_ip", "Blocked"], ["note", "Note"]];
+    const cols = [["crane", "Crane"], ["terminal", "Term."], ["port", "Port"], ["version", "Program · ver"], ["state", "State"], ["pkt_min", "Pkt/min"], ["last_packet", "Last packet"], ["last_size", "Size"], ["last_src", "From"], ["written", "Written"], ["dropped_ip", "Blocked"], ["note", "Note"]];
     $("#stTable").innerHTML = `<tr>${cols.map(([k2, t]) => `<th class="sort ${["pkt_min", "written", "dropped_ip", "last_size", "port"].includes(k2) ? "num" : ""}" data-k="${k2}">${t}${this.sort === k2 ? " ▾" : ""}</th>`).join("")}</tr>` +
       (rows.map(c => {
         const note = c.state === "IP_CONFLICT" ? `blocked ${(c.recent_intruders || []).join(", ")}` :
@@ -428,7 +443,7 @@ App.views.status = {
           c.state === "OFF" ? `listening, not writing${c.pkt_min ? ` (${c.pkt_min}/min arriving)` : ""}` : (c.rule_warning || "");
         const ipOk = !c.last_src || c.last_src === c.ip;
         return `<tr class="click" data-c="${h(c.crane)}"><td><b>${h(c.crane)}</b></td><td>${h(c.terminal)}</td><td class="num">${c.port}${c.rule_warning ? ` <span class="warnicon" title="${h(c.rule_warning)}">⚠</span>` : ""}</td>
-          <td>${h(c.version || "–")}</td><td>${badge(c.state)}</td><td class="num">${c.pkt_min || 0}</td><td>${App.ago(c.last_packet)}</td>
+          <td>${h(App.verLabel(c))}</td><td>${badge(c.state)}</td><td class="num">${c.pkt_min || 0}</td><td>${App.ago(c.last_packet)}</td>
           <td class="num">${c.last_size || "–"}</td><td class="mono ${ipOk ? "" : "warnicon"}">${h(c.last_src || "–")}</td><td class="num">${App.num(c.written)}</td>
           <td class="num">${c.dropped_ip ? `<b style="color:var(--danger)">${App.num(c.dropped_ip)}</b>` : 0}</td><td class="small muted">${note}</td></tr>`;
       }).join("") || `<tr><td colspan="12" class="empty">No cranes registered${App.terminal ? " in " + App.terminal : ""}. Add them in <a href="#config">Configuration</a>.</td></tr>`);
@@ -530,12 +545,12 @@ App.views.dashboard = {
         <div style="width:70%;background:var(--chart-blue);border-radius:4px 4px 0 0;height:${Math.round(110 * w.received / maxW)}px" title="${w.date}: ${w.received} packets, ${(w.active_sec / 3600).toFixed(1)} h active"></div>
         <div class="small">${w.date.slice(5)}</div></div>`).join("");
     const cov = Object.entries(d.coverage).map(([t, g]) => {
-      const n = g.grid[0] ? g.grid[0].cells.length : 0;
+      const n = g.columns || (g.grid[0] ? g.grid[0].cells.length : 0);
       return `<div class="card flat"><h3>${h(t)} coverage</h3>
-        <div class="cov" style="grid-template-columns:22px repeat(${n},34px)"><div></div>${Array.from({length: n}, (_, i) => `<div class="ln small muted">${String(i + 1).padStart(2, "0")}</div>`).join("")}
-        ${g.grid.map(r => `<div class="ln">${r.lane}</div>${r.cells.map(c => `<div class="c ${c.status}" title="${c.crane}: ${c.status === "none" ? "not onboarded" : c.status}">${c.crane.slice(1)}</div>`).join("")}`).join("")}</div>
+        <div class="cov" style="grid-template-columns:22px repeat(${g.columns || n},34px)"><div></div>${Array.from({length: n}, (_, i) => `<div class="ln small muted">${String(i + 1).padStart(2, "0")}</div>`).join("")}
+        ${g.grid.map(r => `<div class="ln">${r.lane}</div>${r.cells.concat(Array(Math.max(0, n - r.cells.length)).fill(null)).map(c => c === null ? `<div></div>` : `<div class="c ${c.status} prog-${h(c.program || "")}" title="${c.crane} · ${h(c.program || "")}: ${c.status === "none" ? "not onboarded" : c.status}">${c.crane.slice(1)}</div>`).join("")}`).join("")}</div>
         ${g.extra.length ? `<div class="small muted" style="margin-top:6px">Also registered under ${t}: ${h(g.extra.join(", "))}</div>` : ""}
-        <div class="legend"><span><i class="dot ok"></i>collecting</span><span><i class="dot attn"></i>registered, writing off</span><span><i class="dot"></i>not onboarded</span></div></div>`;
+        <div class="legend"><span><i class="dot ok"></i>collecting</span><span><i class="dot attn"></i>registered, writing off</span><span><i class="dot"></i>not onboarded</span><span>underline: <b style="color:#378ADD">Retrofit</b> · <b style="color:#7F77DD">New</b> · <b style="color:#EF9F27">ZPMC</b></span></div></div>`;
     }).join("");
     $("#dbBody").innerHTML = `
       <div class="tiles">${tile(T.registered, "cranes registered")}${tile(T.enabled, "writing to InfluxDB")}${tile(T.with_data_today, "sent data this day")}
@@ -548,7 +563,7 @@ App.views.dashboard = {
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(520px,1fr));margin-top:14px">${cov}</div>
       <h3 style="margin-top:16px">Per crane · ${h(d.date)}</h3>
       <div class="tbl-wrap"><table class="t"><tr><th>Crane</th><th>Term.</th><th>Version</th><th>Writing</th><th class="num">Packets</th><th class="num">Written</th><th class="num">Blocked IP</th><th class="num">Wrong size</th><th class="num">Auto h</th><th class="num">Moves</th><th>First / last packet</th><th>Quality</th><th>Notes</th><th class="num">Alarms 7d</th></tr>
-        ${d.cranes.map(c => `<tr class="click" data-c="${h(c.crane)}"><td><b>${h(c.crane)}</b></td><td>${h(c.terminal)}</td><td>${h(c.version || "–")}</td><td>${c.enabled ? "ON" : "OFF"}</td><td class="num">${App.num(c.received)}</td><td class="num">${App.num(c.written)}</td><td class="num">${App.num(c.dropped_ip)}</td><td class="num">${App.num(c.wrong_size)}</td><td class="num">${c.active_hours}</td><td class="num">${c.moves}</td>
+        ${d.cranes.map(c => `<tr class="click" data-c="${h(c.crane)}"><td><b>${h(c.crane)}</b></td><td>${h(c.terminal)}</td><td>${h(c.program ? c.program + " " : "")}${h(c.version || "–")}</td><td>${c.enabled ? "ON" : "OFF"}</td><td class="num">${App.num(c.received)}</td><td class="num">${App.num(c.written)}</td><td class="num">${App.num(c.dropped_ip)}</td><td class="num">${App.num(c.wrong_size)}</td><td class="num">${c.active_hours}</td><td class="num">${c.moves}</td>
           <td class="small">${c.first_ts ? App.fmtTime(c.first_ts, false, false) + " – " + App.fmtTime(c.last_ts, false, false) : "–"}</td>
           <td>${c.quality == null ? "–" : `<div class="row" style="gap:6px"><div class="progress" style="min-width:60px"><i style="width:${c.quality}%;background:${c.quality > 90 ? "var(--dot-ok)" : c.quality > 70 ? "var(--dot-attn)" : "var(--dot-err)"}"></i></div><b>${c.quality}</b></div>`}</td>
           <td class="small muted">${h(c.quality_notes.join("; "))}</td><td class="num">${c.alarms_7d}</td></tr>`).join("") || `<tr><td colspan="14" class="empty">No cranes.</td></tr>`}</table></div>

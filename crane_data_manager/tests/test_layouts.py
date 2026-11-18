@@ -16,10 +16,10 @@ from cdm import layouts as L   # noqa: E402
 
 REPO = HERE.parent.parent
 SCRIPTS = {
-    ("T2", "v2"): REPO / "typingtensions_updatedv2.py",
-    ("T2", "v2.1"): REPO / "typingtensions_updatedv2.1.py",
-    ("T3", "v3"): REPO / "typingtensions_updatedv3.py",
-    ("T4", "v4"): REPO / "typingtensions_updatedv4.py",
+    ("Retrofit", "v2"): REPO / "typingtensions_updatedv2.py",
+    ("Retrofit", "v2.1"): REPO / "typingtensions_updatedv2.1.py",
+    ("ZPMC", "v3"): REPO / "typingtensions_updatedv3.py",
+    ("New", "v4"): REPO / "typingtensions_updatedv4.py",
 }
 
 
@@ -58,7 +58,7 @@ def parse_script(path: Path):
 def baseline(term, name):
     for t, n, size, fn, _ in L.BASELINES:
         if (t, n) == (term, name):
-            return {"id": 1, "name": n, "terminal": t, "packet_size": size, "fields": fn()}
+            return {"id": 1, "name": n, "program": t, "packet_size": size, "fields": fn()}
     raise KeyError(name)
 
 
@@ -82,13 +82,13 @@ class TestBaselinesMatchScripts(unittest.TestCase):
                 self.assertEqual(L.validate(v["fields"], v["packet_size"]), [])
 
     def test_sizes(self):
-        self.assertEqual(L.min_size(baseline("T2", "v2")["fields"]), 344)
-        self.assertEqual(L.min_size(baseline("T2", "v2.1")["fields"]), 364)
-        self.assertEqual(L.min_size(baseline("T3", "v3")["fields"]), 340)
-        self.assertEqual(L.min_size(baseline("T4", "v4")["fields"]), 340)
+        self.assertEqual(L.min_size(baseline("Retrofit", "v2")["fields"]), 344)
+        self.assertEqual(L.min_size(baseline("Retrofit", "v2.1")["fields"]), 364)
+        self.assertEqual(L.min_size(baseline("ZPMC", "v3")["fields"]), 340)
+        self.assertEqual(L.min_size(baseline("New", "v4")["fields"]), 340)
 
     def test_decode_types_and_text(self):
-        v = baseline("T2", "v2.1")
+        v = baseline("Retrofit", "v2.1")
         data = bytearray(364)
         struct.pack_into(">f", data, 7 * 4, 2291.3)
         struct.pack_into(">I", data, 72 * 4, 116)
@@ -111,7 +111,7 @@ class TestBaselinesMatchScripts(unittest.TestCase):
         self.assertEqual(f["StatusWord"], 6421)
 
     def test_nan_left_out(self):
-        v = baseline("T3", "v3")
+        v = baseline("ZPMC", "v3")
         data = bytearray(340)
         struct.pack_into(">f", data, 0, float("nan"))
         f, dropped = L.Decoder(v).decode(bytes(data))
@@ -119,7 +119,7 @@ class TestBaselinesMatchScripts(unittest.TestCase):
         self.assertEqual(dropped, ["In_TRIM"])
 
     def test_validation_locks_and_types(self):
-        base = baseline("T2", "v2")
+        base = baseline("Retrofit", "v2")
         new = [dict(x) for x in base["fields"]]
         new[1] = {**new[1], "name": "RenamedTrim"}
         errs = L.validate(new, 344, base=base)
@@ -128,7 +128,7 @@ class TestBaselinesMatchScripts(unittest.TestCase):
         self.assertEqual(L.validate(new, 344, base=base), [])
         new = [dict(x) for x in base["fields"]] + [L._f("In_TRIM3", "REAL", 0)]
         self.assertTrue(any("overlaps" in e for e in L.validate(new, 344, base=base)))
-        other = baseline("T3", "v3")
+        other = baseline("ZPMC", "v3")
         new = [dict(x) for x in base["fields"]] + [L._f("LoadCellLWS", "DINT", 43)]
         self.assertTrue(any("already stored" in e for e in
                             L.validate(new, 344, base=base, others=[other])))
@@ -136,3 +136,22 @@ class TestBaselinesMatchScripts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPrograms(unittest.TestCase):
+    def test_expected_program_from_the_roster(self):
+        from cdm import registry
+        s = {"program_rules": {
+            "T2": {"default": "Retrofit", "lanes": {"F": "New"}, "cranes": {"A213": "New", "A214": "New"}},
+            "T3": {"default": "ZPMC"}, "T4": {"default": "New"}}}
+        cases = {("A201", "T2"): "Retrofit", ("E211", "T2"): "Retrofit", ("A212", "T2"): "Retrofit",
+                 ("A213", "T2"): "New", ("A214", "T2"): "New", ("F209", "T2"): "New",
+                 ("B404", "T4"): "New", ("B308", "T3"): "ZPMC"}
+        for (crane, term), want in cases.items():
+            self.assertEqual(registry.expected_program(crane, term, s), want, crane)
+
+    def test_port_rule_matches_known_ports(self):
+        from cdm import registry, config
+        s = config.DEFAULTS
+        for term, crane, port, _v in registry.KNOWN_CRANES:
+            self.assertEqual(registry.rule_port(crane, term, s), port, crane)

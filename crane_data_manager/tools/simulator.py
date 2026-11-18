@@ -24,12 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cdm import config as C, db, layouts, registry  # noqa: E402
 
 
-def build_packet(version, t, wo, size=None):
+def build_packet(version, t, wo, size=None, seed=0):
     n = size or int(version["packet_size"])
     data = bytearray(max(n, layouts.min_size(version["fields"])))
-    phase = t / 40.0
+    phase = t / 40.0 + seed * 1.7
+    base = 300 + (seed * 397) % 1900          # each crane works its own part of the lane
     vals = {
-        "In_GANTRY1": 1200 + 400 * math.sin(phase / 3), "In_GANTRY2": 1200 + 400 * math.sin(phase / 3) + 0.3,
+        "In_GANTRY1": base + 250 * math.sin(phase / 3), "In_GANTRY2": base + 250 * math.sin(phase / 3) + 0.3,
         "GANTRYSPEED1": 40 * math.cos(phase / 3), "GANTRYSPEED2": 40 * math.cos(phase / 3),
         "In_TROLLEYPOMUX": 12 + 10 * math.sin(phase), "In_TROLLEYENC": 12.1 + 10 * math.sin(phase),
         "TROLLEYSPEED1": 60 * math.cos(phase), "In_HOIST": 10 + 8 * math.sin(phase * 1.7),
@@ -88,7 +89,8 @@ def main():
         if int(t) % 60 == 0:
             wo += 1
         for c in cranes:
-            sock.sendto(build_packet(vers[c["crane"]], t, wo, a.size), (a.host, c["port"]))
+            seed = int(c["crane"][1:]) + ord(c["crane"][0])
+            sock.sendto(build_packet(vers[c["crane"]], t, wo, a.size, seed), (a.host, c["port"]))
         n += 1
         time.sleep(a.interval)
 

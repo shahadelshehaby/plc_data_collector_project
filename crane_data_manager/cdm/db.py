@@ -30,14 +30,14 @@ CREATE TABLE IF NOT EXISTS cranes (
 );
 CREATE TABLE IF NOT EXISTS versions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    terminal    TEXT NOT NULL,
+    program     TEXT NOT NULL,          -- PLC program family: Retrofit / New / ZPMC
     name        TEXT NOT NULL,
     base_id     INTEGER,
     packet_size INTEGER NOT NULL,
     fields_json TEXT NOT NULL,
     notes       TEXT DEFAULT '',
     created     REAL,
-    UNIQUE(terminal, name)
+    UNIQUE(program, name)
 );
 CREATE TABLE IF NOT EXISTS events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,6 +153,11 @@ def tx(path=None):
 
 def init():
     con = connect()
+    cols = [r["name"] for r in con.execute("PRAGMA table_info(versions)").fetchall()]
+    if "terminal" in cols and "program" not in cols:       # first test builds: T2/T3/T4
+        con.execute("ALTER TABLE versions RENAME COLUMN terminal TO program")
+        con.execute("UPDATE versions SET program = CASE program WHEN 'T2' THEN 'Retrofit' "
+                    "WHEN 'T3' THEN 'ZPMC' WHEN 'T4' THEN 'New' ELSE program END")
     con.executescript(SCHEMA)
     from . import layouts            # seed the baseline versions once
     layouts.seed_versions()

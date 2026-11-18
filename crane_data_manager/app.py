@@ -137,6 +137,7 @@ def index():
 def api_meta():
     s = C.load_settings()
     return jsonify({"version": __version__, "terminals": s["terminals"], "now": time.time(),
+                    "programs": layouts.PROGRAMS, "program_rules": s.get("program_rules", {}),
                     "tz": "Dubai (GMT+4)", "sound": s["sound"], "yard": s["yard"],
                     "groups": layouts.GROUPS, "types": layouts.TYPES,
                     "influx_bucket": s["influx_bucket"]})
@@ -161,6 +162,8 @@ def api_live():
                  "flags": [], "pkt_min": 0, "received": 0, "written": 0, "dropped_ip": 0,
                  "values": {}, "intruders": {}, "recent_intruders": []}
         v["notes"] = c.get("notes", "")
+        v.setdefault("program", c.get("program"))
+        v["expected_program"] = registry.expected_program(c["crane"], c["terminal"])
         v["rule_warning"] = registry.rule_check(c["crane"], c["terminal"], c["port"])
         cranes.append(v)
     alarms = db.rows("SELECT id, ts, crane, terminal, type, message, acked FROM events "
@@ -481,10 +484,13 @@ def _version_check(b):
     others = [v for v in layouts.all_versions() if not base or v["id"] != base["id"]]
     errs = layouts.validate(fields, size, base=base, others=others)
     name = str(b.get("name") or "").strip()
-    term = b.get("terminal")
+    term = b.get("program")
+    if term not in layouts.PROGRAMS and not db.one("SELECT id FROM versions WHERE program=?",
+                                                   (term,)):
+        errs.append(f"unknown program '{term}'")
     if not name:
         errs.append("give the version a name, e.g. v2.2")
-    elif db.one("SELECT id FROM versions WHERE terminal=? AND lower(name)=lower(?)",
+    elif db.one("SELECT id FROM versions WHERE program=? AND lower(name)=lower(?)",
                 (term, name)):
         errs.append(f"{term} already has a version named {name}")
     return base, fields, size, errs
@@ -529,9 +535,9 @@ def api_version_create():
     base, fields, size, errs = _version_check(b)
     if errs:
         raise UserError("; ".join(errs))
-    term = b["terminal"]
-    registry.backup(f"New version {b['name']}")
-    vid = db.execute("INSERT INTO versions(terminal,name,base_id,packet_size,fields_json,notes,"
+    term = b["program"]
+    registry.backup(f"New version {term} {b['name']}")
+    vid = db.execute("INSERT INTO versions(program,name,base_id,packet_size,fields_json,notes,"
                      "created) VALUES(?,?,?,?,?,?,?)",
                      (term, b["name"].strip(), base and base["id"], size, json.dumps(fields),
                       str(b.get("notes") or ""), time.time()))
@@ -562,7 +568,7 @@ def api_version_delete(vid):
         raise UserError("baseline versions cannot be deleted")
     registry.backup(f"Delete version {v['name']}")
     db.execute("DELETE FROM versions WHERE id=?", (vid,))
-    db.audit("Delete version", f"{v['terminal']} {v['name']}", reason)
+    db.audit("Delete version", f"{v['program']} {v['name']}", reason)
     return jsonify({"ok": True})
 
 

@@ -453,10 +453,11 @@ class CollectorService:
 
     def suggest_versions(self, rt, size):
         out = []
+        prog = (rt.cfg.version or {}).get("program")
         for v in layouts.all_versions():
             if int(v["packet_size"]) == size:
-                out.append({"id": v["id"], "name": v["name"], "terminal": v["terminal"]})
-        out.sort(key=lambda v: (v["terminal"] != rt.cfg.terminal, v["name"]))
+                out.append({"id": v["id"], "name": v["name"], "program": v["program"]})
+        out.sort(key=lambda v: (v["program"] != prog, v["name"]))
         return out
 
     def evaluate_alarms(self):
@@ -585,6 +586,7 @@ class CollectorService:
                     "enabled": cfg.enabled,
                     "version_id": cfg.version and cfg.version["id"],
                     "version": cfg.version and cfg.version["name"],
+                    "program": cfg.version and cfg.version["program"],
                     "expected_size": cfg.decoder and cfg.decoder.packet_size,
                     "state": state, "flags": flags, "live": live,
                     "pkt_min": len(rt.recent), "received": rt.received, "written": rt.written,

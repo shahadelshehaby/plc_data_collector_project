@@ -11,12 +11,17 @@ Field types (slot = 4-byte word index, as in the PLC ConvertValArr / BufferConve
     BIT    one bit of a DWORD field (0/1)      -> InfluxDB integer
     TEXT   ASCII text starting at a slot       -> InfluxDB string
 
+Versions belong to a PLC program family (not to a terminal):
+    Retrofit  T2 lanes A-E (A201 ... E211)             v2, v2.1
+    New       T2 lane F, A213, A214 and Terminal 4     v4
+    ZPMC      Terminal 3                               v3
+
 The baseline versions below reproduce the old scripts exactly (names, slots,
 bits and types), so the data in InfluxDB stays the same:
-    T2  v2    typingtensions_updatedv2.py   / terminal2_collector version "2"
-    T2  v2.1  typingtensions_updatedv2.1.py / terminal2_collector version "2.1"
-    T3  v3    typingtensions_updatedv3.py
-    T4  v4    typingtensions_updatedv4.py
+    Retrofit  v2    typingtensions_updatedv2.py   / terminal2_collector version "2"
+    Retrofit  v2.1  typingtensions_updatedv2.1.py / terminal2_collector version "2.1"
+    ZPMC      v3    typingtensions_updatedv3.py
+    New       v4    typingtensions_updatedv4.py
 """
 import json
 import math
@@ -197,13 +202,15 @@ def _t34(rest):
             _bits(84, _T34_SW_COMMON + rest))
 
 
+PROGRAMS = ["Retrofit", "New", "ZPMC"]
+
 BASELINES = [
-    ("T2", "v2", 344, _t2_v2, "Baseline from typingtensions_updatedv2.py (86 slots, 344 bytes)"),
-    ("T2", "v2.1", 364, _t2_v21, "v2 + brakes, neighbour crane state/distance, spreader skew "
+    ("Retrofit", "v2", 344, _t2_v2, "Baseline from typingtensions_updatedv2.py (86 slots, 344 bytes)"),
+    ("Retrofit", "v2.1", 364, _t2_v21, "v2 + brakes, neighbour crane state/distance, spreader skew "
                                  "(91 slots, 364 bytes)"),
-    ("T3", "v3", 340, lambda: _t34(_T3_SW_REST), "Baseline from typingtensions_updatedv3.py "
+    ("ZPMC", "v3", 340, lambda: _t34(_T3_SW_REST), "Baseline from typingtensions_updatedv3.py "
                                                  "(85 slots, 340 bytes)"),
-    ("T4", "v4", 340, lambda: _t34(_T4_SW_REST), "Baseline from typingtensions_updatedv4.py "
+    ("New", "v4", 340, lambda: _t34(_T4_SW_REST), "Baseline from typingtensions_updatedv4.py "
                                                  "(85 slots, 340 bytes)"),
 ]
 
@@ -216,7 +223,7 @@ def seed_versions():
     for term, name, size, fn, notes in BASELINES:
         base = ids.get(term) if name == "v2.1" else None
         ids[term] = db.execute(
-            "INSERT INTO versions(terminal,name,base_id,packet_size,fields_json,notes,created) "
+            "INSERT INTO versions(program,name,base_id,packet_size,fields_json,notes,created) "
             "VALUES(?,?,?,?,?,?,?)",
             (term, name, base, size, json.dumps(fn()), notes, time.time()))
         all_ids.append(ids[term])
@@ -235,7 +242,7 @@ def get_version(vid):
 def all_versions():
     from . import db
     out = []
-    for v in db.rows("SELECT * FROM versions ORDER BY terminal, id"):
+    for v in db.rows("SELECT * FROM versions ORDER BY program, id"):
         v["fields"] = json.loads(v.pop("fields_json"))
         out.append(v)
     return out
@@ -319,7 +326,7 @@ def validate(fields, packet_size, base=None, others=()):
     known = {}
     for o in others:
         for f in o["fields"]:
-            known.setdefault(f["name"], (INFLUX_TYPE[f["type"]], o["terminal"], o["name"]))
+            known.setdefault(f["name"], (INFLUX_TYPE[f["type"]], o["program"], o["name"]))
     for n, f in names.items():
         if n in known and f.get("type") in INFLUX_TYPE and INFLUX_TYPE[f["type"]] != known[n][0]:
             errs.append(f"'{n}' is already stored in InfluxDB as {known[n][0]} "

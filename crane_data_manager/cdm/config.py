@@ -49,9 +49,19 @@ DEFAULTS = {
     "popup_types": ["IP_CONFLICT", "WRONG_SIZE", "INFLUX_WRITE", "SERVICE_DOWN",
                     "PORT_BUSY", "PARSE_ERROR"],
     "terminals": {
-        "T2": {"name": "Terminal 2", "port_base": 12200, "lanes": "ABCDEF", "cranes_per_lane": 14},
-        "T3": {"name": "Terminal 3", "port_base": 12300, "lanes": "ABCDE", "cranes_per_lane": 14},
-        "T4": {"name": "Terminal 4", "port_base": 12400, "lanes": "ABCDE", "cranes_per_lane": 14},
+        "T2": {"name": "Terminal 2", "port_base": 12200, "lanes": "ABCDEF",
+               "lane_counts": {"A": 14, "B": 14, "C": 12, "D": 11, "E": 11, "F": 10}},
+        "T3": {"name": "Terminal 3", "port_base": 12300, "lanes": "ABCDE",
+               "lane_counts": {"A": 10, "B": 10, "C": 10, "D": 10, "E": 10}},
+        "T4": {"name": "Terminal 4", "port_base": 12400, "lanes": "ABCDE",
+               "lane_counts": {"A": 7, "B": 7, "C": 7, "D": 7, "E": 7}},
+    },
+    # PLC program family each crane is expected to run (used for suggestions and warnings)
+    "programs": ["Retrofit", "New", "ZPMC"],
+    "program_rules": {
+        "T2": {"default": "Retrofit", "lanes": {"F": "New"}, "cranes": {"A213": "New", "A214": "New"}},
+        "T3": {"default": "ZPMC"},
+        "T4": {"default": "New"},
     },
     # Live map scaling (metres). Auto-widens if live values go past these.
     "yard": {"gantry_min": 0, "gantry_max": 2600, "trolley_max": 30, "hoist_max": 20},
@@ -72,7 +82,8 @@ def load_settings() -> dict:
         try:
             user = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
             for k, v in user.items():
-                if isinstance(v, dict) and isinstance(s.get(k), dict) and k != "terminals":
+                if isinstance(v, dict) and isinstance(s.get(k), dict) and \
+                        k not in ("terminals", "program_rules"):
                     s[k].update(v)
                 else:
                     s[k] = v

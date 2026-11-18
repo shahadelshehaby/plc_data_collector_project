@@ -16,7 +16,7 @@ from . import config as C
 from . import db, layouts
 
 CRANE_RE = re.compile(r"^([A-Z])(\d)(\d{2})$")
-TEMPLATE_COLUMNS = ["Terminal", "Crane", "Port", "IP", "Version", "Enabled", "Notes"]
+TEMPLATE_COLUMNS = ["Terminal", "Crane", "Port", "IP", "Program", "Version", "Enabled", "Notes"]
 
 # Cranes known from the current collectors (ports only - you fill in the IPs).
 KNOWN_CRANES = [
@@ -28,8 +28,21 @@ KNOWN_CRANES = [
     ("T2", "D207", 12240, "v2.1"), ("T2", "E202", 12211, "v2.1"), ("T2", "E208", 12247, "v2"),
     ("T3", "B308", 12337, "v3"), ("T3", "B309", 12342, "v3"), ("T3", "A301", 12301, "v3"),
     ("T3", "C308", 12338, "v3"),
-    ("T4", "B404", 12417, "v4"), ("T4", "F209", 12254, "v4"), ("T4", "F202", 12212, "v4"),
+    ("T2", "F209", 12254, "v4"), ("T2", "F202", 12212, "v4"),
+    ("T4", "B404", 12417, "v4"),
 ]
+
+
+# ── Program family ───────────────────────────────────────────────────────────
+def expected_program(crane, terminal, settings=None):
+    """Retrofit / New / ZPMC the crane is expected to run (Configuration > System)."""
+    s = settings or C.load_settings()
+    r = s.get("program_rules", {}).get(terminal) or {}
+    if crane in (r.get("cranes") or {}):
+        return r["cranes"][crane]
+    if crane and crane[0] in (r.get("lanes") or {}):
+        return r["lanes"][crane[0]]
+    return r.get("default")
 
 
 # ── Port rule ────────────────────────────────────────────────────────────────
@@ -68,7 +81,7 @@ def rule_check(crane, terminal, port, settings=None):
 # ── Read / validate ──────────────────────────────────────────────────────────
 def list_cranes(terminal=None):
     sql = ("SELECT c.*, v.name AS version_name, v.packet_size AS packet_size, "
-           "v.terminal AS version_terminal FROM cranes c LEFT JOIN versions v ON v.id=c.version_id")
+           "v.program AS program FROM cranes c LEFT JOIN versions v ON v.id=c.version_id")
     if terminal:
         return db.rows(sql + " WHERE c.terminal=? ORDER BY c.crane", (terminal,))
     return db.rows(sql + " ORDER BY c.terminal, c.crane")
@@ -94,7 +107,7 @@ def norm_terminal(t):
     return t
 
 
-def find_version(terminal, name):
+def find_version(program, name):
     name = str(name or "").strip()
     if not name:
         return None
@@ -102,9 +115,9 @@ def find_version(terminal, name):
         name = "v" + name                                   # 2.1 -> v2.1
     if not name.lower().startswith("v"):
         name = "v" + name
-    vs = db.rows("SELECT id, terminal, name FROM versions WHERE lower(name)=lower(?)", (name,))
+    vs = db.rows("SELECT id, program, name FROM versions WHERE lower(name)=lower(?)", (name,))
     for v in vs:
-        if v["terminal"] == terminal:
+        if program and v["program"].lower() == str(program).lower():
             return v
     return vs[0] if len(vs) == 1 else None
 
@@ -133,11 +146,13 @@ def validate_crane(c, others, settings):
         if c.get("ip") and o.get("ip") == c.get("ip"):
             errs.append(f"IP {c['ip']} is already registered for {o['crane']}")
     if c.get("version_id"):
-        v = db.one("SELECT terminal, name FROM versions WHERE id=?", (c["version_id"],))
+        v = db.one("SELECT program, name FROM versions WHERE id=?", (c["version_id"],))
+        exp = expected_program(c.get("crane"), c.get("terminal"), settings)
         if not v:
             errs.append("version not found")
-        elif v["terminal"] != c.get("terminal"):
-            warns.append(f"runs the {v['terminal']} layout {v['name']}")
+        elif exp and v["program"] != exp:
+            warns.append(f"{c.get('crane')} is expected to run the {exp} program, but "
+                         f"{v['program']} {v['name']} is chosen")
     w = rule_check(c.get("crane"), c.get("terminal"), port, settings) if port else ""
     if w:
         warns.append(w)
@@ -188,9 +203,9 @@ def restore_backup(name, reason):
                          c["enabled"], c.get("notes", ""), c.get("created"), time.time()))
         con.execute("DELETE FROM versions")
         for v in d["versions"]:
-            con.execute("INSERT INTO versions(id,terminal,name,base_id,packet_size,fields_json,"
+            con.execute("INSERT INTO versions(id,program,name,base_id,packet_size,fields_json,"
                         "notes,created) VALUES(?,?,?,?,?,?,?,?)",
-                        (v["id"], v["terminal"], v["name"], v["base_id"], v["packet_size"],
+                        (v["id"], v.get("program") or v.get("terminal"), v["name"], v["base_id"], v["packet_size"],
                          v["fields_json"], v.get("notes", ""), v.get("created")))
     db.audit("Restore configuration", name, reason)
 
@@ -257,27 +272,34 @@ def build_template(prefill=True) -> bytes:
     if prefill:
         seen = set()
         for c in existing.values():
-            ws.append([c["terminal"], c["crane"], c["port"], c["ip"], c["version_name"],
-                       "Yes" if c["enabled"] else "No", c.get("notes", "")])
+            ws.append([c["terminal"], c["crane"], c["port"], c["ip"], c["program"],
+                       c["version_name"], "Yes" if c["enabled"] else "No", c.get("notes", "")])
             seen.add(c["crane"])
         for term, crane, port, ver in KNOWN_CRANES:
             if crane not in seen:
-                ws.append([term, crane, port, "", ver, "Yes", "fill in the PLC IP"])
-    for col, w in zip("ABCDEFG", (10, 10, 10, 16, 10, 9, 36)):
+                ws.append([term, crane, port, "", expected_program(crane, term), ver, "Yes",
+                           "fill in the PLC IP"])
+    for col, w in zip("ABCDEFGH", (10, 10, 10, 16, 11, 10, 9, 36)):
         ws.column_dimensions[col].width = w
     dv = DataValidation(type="list", formula1='"Yes,No"', allow_blank=True)
     ws.add_data_validation(dv)
-    dv.add("F2:F2000")
+    dv.add("G2:G2000")
+    pv = DataValidation(type="list", formula1='"' + ",".join(layouts.PROGRAMS) + '"',
+                        allow_blank=True)
+    ws.add_data_validation(pv)
+    pv.add("E2:E2000")
     vs = wb.create_sheet("Versions")
-    vs.append(["Terminal", "Version", "Packet size (bytes)", "Fields"])
+    vs.append(["Program", "Version", "Packet size (bytes)", "Fields"])
     for v in layouts.all_versions():
-        vs.append([v["terminal"], v["name"], v["packet_size"], len(v["fields"])])
+        vs.append([v["program"], v["name"], v["packet_size"], len(v["fields"])])
     hs = wb.create_sheet("Help")
     for line in [
         "One row per crane. Every sheet named 'Cranes' (or any sheet with these headers) is read.",
         "Terminal: T2, T3 or T4.   Crane: e.g. E208.   Port: the crane's UDP port, e.g. 12247.",
+        "Program: Retrofit, New or ZPMC (blank = the expected one: T2 A-E Retrofit, T2 lane F /",
+        "A213 / A214 / T4 New, T3 ZPMC).",
         "IP: the crane PLC's IP address. Required: the collector only accepts this IP on this port.",
-        "Version: a packet version name from the 'Versions' sheet, e.g. v2.1 (2.1 also works).",
+        "Version: a version of that program from the 'Versions' sheet, e.g. v2.1 (2.1 also works).",
         "Enabled: Yes = collect and write to InfluxDB.  No = keep listening but do not write.",
         "Nothing is changed until you check the preview in the platform and confirm.",
         "Cranes that are in the platform but not in the file are only removed if you tick",
@@ -320,6 +342,7 @@ def read_excel(data: bytes):
                 "port": get(r, "port"),
                 "ip": get(r, "ip"),
                 "version": None if ver is None else str(ver).strip(),
+                "program": str(get(r, "program") or "").strip(),
                 "enabled": None if en is None else str(en).strip().lower() in
                 ("yes", "y", "1", "true", "on", "enabled"),
                 "notes": str(get(r, "notes") or ""),
@@ -352,10 +375,11 @@ def import_preview(rows_in, remove_missing=False):
             ip = ""
             item["errors"].append(f"IP '{r['ip']}' is not a valid IPv4 address")
         ver_txt = r["version"]
-        v = find_version(term, ver_txt) if ver_txt and ver_txt.lower() not in ("na", "n/a", "-") \
+        prog = r.get("program") or expected_program(r["crane"], term)
+        v = find_version(prog, ver_txt) if ver_txt and ver_txt.lower() not in ("na", "n/a", "-") \
             else None
         if ver_txt and not v and ver_txt.lower() not in ("na", "n/a", "-"):
-            item["errors"].append(f"version '{ver_txt}' not found")
+            item["errors"].append(f"version '{ver_txt}' not found for program {prog}")
         old = current.get(r["crane"])
         new = {"crane": r["crane"], "terminal": term, "port": port, "ip": ip,
                "version_id": v["id"] if v else (old or {}).get("version_id"),
@@ -363,6 +387,7 @@ def import_preview(rows_in, remove_missing=False):
                else bool((old or {}).get("enabled", True)),
                "notes": r["notes"] or (old or {}).get("notes", "")}
         new["version_name"] = (v or {}).get("name") or (old or {}).get("version_name")
+        new["program"] = (v or {}).get("program") or (old or {}).get("program")
         item["new"] = new
         if old:
             for k, label in (("terminal", "terminal"), ("port", "port"), ("ip", "IP"),

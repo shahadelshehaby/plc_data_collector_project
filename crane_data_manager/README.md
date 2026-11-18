@@ -9,7 +9,22 @@ status screen.
 (`crane_telemetry`), tag (`crane_id`), field names and field types as the old scripts. Gantry
 Watch, FDD Evaluation and your InfluxDB notebooks keep working. This is checked
 automatically against the original scripts (`tests/test_layouts.py`: 108 / 127 / 100 / 89
-fields for T2 v2 / T2 v2.1 / T3 / T4).
+fields for Retrofit v2 / Retrofit v2.1 / ZPMC v3 / New v4).
+
+## PLC programs
+
+Packet versions belong to the crane's **PLC program**, not to the terminal:
+
+| Program | Cranes | Versions (baseline = old script) |
+|---|---|---|
+| **Retrofit** | T2 lanes A–E (A201 … E211, except A213 and A214) | v2, v2.1 |
+| **New** | T2 lane F (F201 … F210), A213, A214 and all of T4 | v4 |
+| **ZPMC** | T3 (A301 … E310) | v3 |
+
+The platform knows which program each crane is expected to run (Configuration → System;
+`program_rules` in `settings.json`). It uses this to pre-select versions and to warn when a
+crane is given another program's version. Lane sizes follow the crane roster: T2 A 14,
+B 14, C 12, D 11, E 11, F 10; T3 10 per lane; T4 7 per lane.
 
 ```
 Crane PLCs ──UDP──► Westermo ──► COLLECTOR PC (192.168.100.237)
@@ -47,7 +62,8 @@ collector that still holds a port makes that crane show **Port busy** until the 
 After that, the new collector takes the port over by itself within 10 seconds.
 
 1. **Configuration → Cranes → Download template.** The template is pre-filled with every
-   crane and port from your current collectors. Fill in each PLC's **IP**.
+   crane, port and program from your current collectors. Fill in each PLC's **IP**.
+   F202 and F209 are T2 cranes running the New program (v4).
 2. Delete the T3/T4 rows for now (or set *Enabled* = No), then **Import Excel…** →
    check the preview → apply.
 3. Stop the old T2 collectors (the installer offers to). Check **Live Status**: T2 cranes go
@@ -58,7 +74,7 @@ After that, the new collector takes the port over by itself within 10 seconds.
 
 | Tab | What it is for |
 |---|---|
-| **Live Map** | *Network*: the data path PLC → Westermo → collector → InfluxDB, with moving packets. A blocked intruder IP is drawn in red. *Yard*: every lane as a rail, cranes at their live gantry position, with trolley, hoist and spreader. *Replay*: play a past period back on the yard. Click a crane for its panel. |
+| **Live Map** | The **Crane Yard** live twin, in the Engineering City look. *Yard*: an isometric 3D yard with every lane's rails and container stacks, and every crane as a 3D ARMG at its live gantry position. Trolley, hoist, spreader and container move too. A roof beacon shows health and a girder band shows the program. Each real packet flows as a light dot from the crane over the Westermo router to the collector building, and on to the NAS. Blocked intruder packets stop in red at the IP-lock gate. Side panels: terminals and lanes (live/registered, show or hide), collector status, live events. Scroll to zoom, drag to move. *Data path*: every crane in a list, linked to Westermo → collector → InfluxDB. *Replay*: play a past period back on the 3D yard. Hover a crane for a summary, click it for its panel. |
 | **Live Status** | The console table, live (updates every 1.5 s), sortable, with filters. |
 | **Alarms & Events** | Active alarms (acknowledge with a note; one-click *Switch version* for wrong-size packets) and 90 days of history, CSV download. |
 | **Dashboard** | Per terminal and day: cranes onboarded, versions in use, packets, Auto hours, moves, data-quality score, coverage grid (lanes × cranes), insights. *Yesterday* = daily digest. |
@@ -114,8 +130,8 @@ settings when it starts.
 
 ## Packet versions (when the PLC sends new data)
 
-Configuration → Packet versions → pick the current version (e.g. T2 v2.1) → **New version
-from v2.1**.
+Configuration → Packet versions (grouped by program) → pick the current version (e.g.
+Retrofit v2.1) → **New version from v2.1**.
 
 1. Name it (e.g. `v2.2`) and describe what changed.
 2. Add one row per new value: field name, type (REAL / DINT / DWORD / BIT of a status word /
@@ -123,13 +139,13 @@ from v2.1**.
    The editor shows the next free slot and the free bits, and draws the packet map.
 3. **Test on live data**: decodes a crane's latest real packet with the new version, so you
    see the new values before anything is saved.
-4. Choose the cranes that run it (one by one, or *All cranes in T2*).
+4. Choose the cranes that run it (one by one, or *All Retrofit cranes*).
 5. **Save & apply**: only those cranes reload.
 
 Rules that keep InfluxDB consistent:
 - Fields from the previous version are **locked**: they cannot be renamed, moved or removed.
 - A field name that exists anywhere must keep its InfluxDB type. For example, `LoadCellLWS`
-  is a float in T3, so it cannot become an integer elsewhere; InfluxDB would reject the data.
+  is a float in ZPMC, so it cannot become an integer elsewhere; InfluxDB would reject the data.
 - The packet size is calculated from the fields (you can override it).
 
 ## Intelligence (offline, plain Python)

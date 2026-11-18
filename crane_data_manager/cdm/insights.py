@@ -137,15 +137,18 @@ class CraneInsights:
         return out
 
 
-def quality_score(stats: dict) -> dict:
+def quality_score(stats: dict, enabled=True) -> dict:
     """Data quality 0-100 for one crane-day from its daily counters."""
     rx = stats.get("received") or 0
     if not rx:
         return {"score": None, "notes": ["no data"]}
     score, notes = 100.0, []
     written = stats.get("written") or 0
-    lost = max(0, rx - written) / rx
-    if lost > 0.001:
+    # a few packets are always on their way to InfluxDB when the counters are saved
+    lost = max(0, rx - written - 10) / rx
+    if not enabled:
+        notes.append("writing OFF (not counted against quality)")
+    elif lost > 0.002:
         score -= min(40, lost * 400)
         notes.append(f"{lost:.1%} of packets not written")
     for key, label, weight in (("wrong_size", "wrong-size packets", 300),
