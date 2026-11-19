@@ -528,15 +528,18 @@ App.views.dashboard = {
     el.innerHTML = `
       <div class="row" style="margin-bottom:12px"><h2 style="margin:0">Dashboard ${App.terminal ? "· " + h(App.meta.terminals[App.terminal].name) : "· all terminals"}</h2>
         <input type="date" id="dbDate" value="${this.date}"><button class="btn sm" id="dbToday">Today</button><button class="btn sm" id="dbYest">Yesterday (daily digest)</button>
-        <span class="right small muted">Figures come from the collector's own counters (kept locally, 90 days).</span></div>
+        <span class="right small muted" id="dbUpd"></span><button class="btn sm" id="dbRef" title="Refresh the dashboard">⟳ Refresh</button></div>
+      <div class="small muted" style="margin:-6px 0 10px">Figures come from the collector's own counters (kept locally, 90 days). The dashboard is a report: press Refresh to update it.</div>
       <div id="dbBody"><div class="empty">Loading…</div></div>`;
     $("#dbDate").onchange = e => { this.date = e.target.value; this.load(); };
+    $("#dbRef").onclick = () => { $("#dbRef").disabled = true; this.load().finally(() => { const b = $("#dbRef"); if (b) b.disabled = false; }); };
     $("#dbToday").onclick = () => { this.date = App.today(); $("#dbDate").value = this.date; this.load(); };
     $("#dbYest").onclick = () => { this.date = App.localInput(Date.now() / 1000 - 86400).slice(0, 10); $("#dbDate").value = this.date; this.load(); };
     this.load();
   },
   async load() {
     const d = await App.api(`/api/dashboard?date=${this.date}` + (App.terminal ? "&terminal=" + App.terminal : ""));
+    if ($("#dbUpd")) $("#dbUpd").textContent = "updated " + App.fmtTime(Date.now() / 1000, true, false);
     const T = d.totals;
     const tile = (v, l) => `<div class="tile"><div class="v">${v ?? "–"}</div><div class="l">${l}</div></div>`;
     const maxW = Math.max(1, ...d.week.map(w => w.received));

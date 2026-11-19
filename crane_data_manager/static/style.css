@@ -333,8 +333,8 @@ body.citymode input,body.citymode select,body.citymode textarea{background:#0812
 .cty-tick{font-size:7px;fill:#3b6d86;font-family:Consolas,monospace}
 .cty-lt{font-size:10px;font-weight:700;letter-spacing:.12em;fill:#eef8fd}
 .cty-ls{font-size:7px;letter-spacing:.14em;fill:#7fa6ba;font-family:Consolas,monospace}
-.ytag{font-size:9px;font-weight:700;fill:#dcecf5;text-anchor:middle;letter-spacing:.06em;paint-order:stroke;stroke:#05090d;stroke-width:2.2px}
-.ysub{font-size:6.5px;text-anchor:middle;font-family:Consolas,monospace;letter-spacing:.04em;paint-order:stroke;stroke:#05090d;stroke-width:2px}
+.ytag{font-size:12px;font-weight:700;fill:#dcecf5;text-anchor:middle;letter-spacing:.06em;paint-order:stroke;stroke:#05090d;stroke-width:2.2px}
+.ysub{font-size:8.5px;text-anchor:middle;font-family:Consolas,monospace;letter-spacing:.04em;paint-order:stroke;stroke:#05090d;stroke-width:2px}
 .ycrane{cursor:pointer}
 .ycrane:hover .ytag{fill:#3fd0ff}
 .ycrane.ghost,.ycrane-b.ghost{opacity:.4}
@@ -367,3 +367,28 @@ body.citymode .banner.pending{background:rgba(60,40,8,.92);color:#ffd08a;border-
 body.citymode .banner.down{background:linear-gradient(90deg,#5a0f14,#2a070a);border-bottom:1px solid #ff6b6b}
 html.citymode{background:#05080c}
 body.citymode{min-height:100vh}
+/* yard: layout toggle, slots, buildings, context panel */
+.cty-layout{position:absolute;left:40px;top:14px;display:flex;gap:2px;padding:3px;border:1px solid rgba(63,208,255,.3);border-radius:5px;background:rgba(8,18,28,.88);z-index:3}
+.cty-layout button{border:0;background:none;color:#7fa6ba;padding:4px 10px;border-radius:3px;font:inherit;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+.cty-layout button.on{background:rgba(63,208,255,.16);color:#eef8fd;box-shadow:inset 0 0 0 1px rgba(63,208,255,.45)}
+.cty-slot{font-size:6.5px;fill:#2f6f8f;text-anchor:middle;font-family:Consolas,monospace;letter-spacing:.04em}
+.cty-slot.on{fill:#4d8fae}
+.cty-lane{cursor:pointer}.cty-lane:hover{fill:#3fd0ff}
+.cty-svg.far .ysub,.cty-svg.far .cty-slot,.cty-svg.far .cty-tick{display:none}
+.cty-bld{cursor:pointer;transition:filter .3s}
+.cty-bld:hover{filter:drop-shadow(0 0 4px rgba(63,208,255,.7))}
+.cty-bld.sel{filter:drop-shadow(0 0 7px #3fd0ff) drop-shadow(0 0 2px #9fe9ff)}
+.ycrane.sel .ytag{fill:#3fd0ff}
+.cty-mini b.a{color:#ffb547}.cty-mini b.r{color:#ff6b6b}
+.cty-err{color:#ff9b9b!important;font-family:Consolas,monospace;font-size:11.5px!important}
+.cty-ftbl{max-height:300px;overflow:auto;margin-top:10px;border-top:1px solid rgba(63,208,255,.12)}
+.cty-ftbl table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;font-size:11.5px}
+.cty-ftbl th{position:sticky;top:0;background:#0b1520;color:#5fa9c9;font-weight:600;text-align:left;padding:5px 4px;font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.cty-ftbl td{padding:4px;border-top:1px solid rgba(63,208,255,.08);color:#9fc3d6;white-space:nowrap}
+.cty-ftbl td b{color:#dcecf5}
+.cty-ftbl tr{cursor:pointer}.cty-ftbl tr:hover td{background:rgba(63,208,255,.06)}
+.cty-ftbl tr.bad td{color:#ff9b9b}
+.cty-ftbl td i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:0}
+.cty-pbtns{flex-wrap:wrap}
+.cty-mini span{white-space:nowrap}
+.cty-mini b{overflow-wrap:anywhere}

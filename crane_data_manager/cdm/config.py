@@ -36,6 +36,8 @@ DEFAULTS = {
     "platform_port": 5300,
     "control_port": 5301,                # collector service <-> platform (localhost only)
     "listen_address": "0.0.0.0",
+    "westermo_ip": "192.168.100.1",      # shown on the Live Map (Westermo panel)
+    "collector_ip": "192.168.100.237",   # the collector PC the Westermo forwards to
     "udp_buffer_size": 2048,
     "no_data_after_sec": 10,             # no packet for this long -> Idle / no data
     "alarm_clear_after_sec": 120,        # condition gone this long -> alarm cleared

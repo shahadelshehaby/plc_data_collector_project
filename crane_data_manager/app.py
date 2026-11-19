@@ -140,7 +140,10 @@ def api_meta():
                     "programs": layouts.PROGRAMS, "program_rules": s.get("program_rules", {}),
                     "tz": "Dubai (GMT+4)", "sound": s["sound"], "yard": s["yard"],
                     "groups": layouts.GROUPS, "types": layouts.TYPES,
-                    "influx_bucket": s["influx_bucket"]})
+                    "influx_bucket": s["influx_bucket"], "influx_url": s["influx_url"],
+                    "influx_org": s["influx_org"], "influx_measurement": s["influx_measurement"],
+                    "westermo_ip": s.get("westermo_ip"), "collector_ip": s.get("collector_ip"),
+                    "listen_address": s.get("listen_address")})
 
 
 # ── live ─────────────────────────────────────────────────────────────────────
@@ -598,7 +601,8 @@ def api_settings():
     b = body()
     reason = need_reason(b)
     allowed = {"influx_url", "influx_org", "influx_bucket", "sound", "desktop_popups",
-               "popup_types", "no_data_after_sec", "yard", "terminals"}
+               "popup_types", "no_data_after_sec", "yard", "terminals", "westermo_ip",
+               "collector_ip"}
     before = {k: s.get(k) for k in allowed}
     for k in allowed:
         if k in b:

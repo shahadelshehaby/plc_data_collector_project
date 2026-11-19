@@ -299,6 +299,7 @@ App.views.config = {
     $("#syTerm").innerHTML = `<table class="t"><tr><th>Terminal</th><th>Name</th><th>Port base</th><th>Lanes</th><th>Cranes per lane</th></tr>${Object.entries(s.terminals).map(([k, t]) => `<tr data-t="${k}"><td><b>${k}</b></td><td><input data-k="name" value="${h(t.name)}" style="width:110px"></td><td><input data-k="port_base" value="${t.port_base}" style="width:70px"></td><td><input data-k="lanes" value="${h(t.lanes)}" style="width:80px"></td><td><input data-k="lane_counts" value="${h(Object.entries(t.lane_counts || {}).map(([l, n]) => l + "=" + n).join(" "))}" style="width:190px" title="e.g. A=14 B=14 C=12"></td></tr>`).join("")}</table>
       <p class="small muted">Program per crane (Retrofit / New / ZPMC) - used to suggest versions and flag mismatches:<br>${Object.entries(s.program_rules || {}).map(([t, r]) => `<b>${t}</b>: ${h(r.default || "")}${r.lanes ? Object.entries(r.lanes).map(([l, p]) => `, lane ${l} = ${p}`).join("") : ""}${r.cranes ? Object.entries(r.cranes).map(([c, p]) => `, ${c} = ${p}`).join("") : ""}`).join(" · ")} (edit program_rules in settings.json)</p>
       <p class="small muted">Port rule: port = base + (crane number − 1) × number of lanes + lane position (A = 1). Used only to flag inconsistencies.</p>
+      <div class="row"><label class="f">Westermo router IP<input id="nW" value="${h(s.westermo_ip || "")}" style="width:130px"></label><label class="f">Collector PC IP<input id="nC" value="${h(s.collector_ip || "")}" style="width:130px"></label></div>
       <div class="row"><label class="f">Yard gantry min (m)<input id="yMin" value="${s.yard.gantry_min}" style="width:80px"></label><label class="f">gantry max<input id="yMax" value="${s.yard.gantry_max}" style="width:80px"></label><label class="f">trolley max<input id="yT" value="${s.yard.trolley_max}" style="width:70px"></label><label class="f">hoist max<input id="yH" value="${s.yard.hoist_max}" style="width:70px"></label></div>
       <button class="btn primary" id="sySave" style="margin-top:8px">Save…</button>`;
     $("#sySave").onclick = async () => {
@@ -312,7 +313,7 @@ App.views.config = {
       const yard = {gantry_min: +$("#yMin").value, gantry_max: +$("#yMax").value, trolley_max: +$("#yT").value, hoist_max: +$("#yH").value};
       const r = await App.confirm({title: "Save terminal settings", summary: "Terminal names, port rules and yard scale are updated."});
       if (!r) return;
-      try { await App.api("/api/settings", {json: {terminals, yard, ...r}}); App.meta = await App.api("/api/meta"); App.toast("Saved", "ok"); } catch (e) { App.err(e); }
+      try { await App.api("/api/settings", {json: {terminals, yard, westermo_ip: $("#nW").value.trim(), collector_ip: $("#nC").value.trim(), ...r}}); App.meta = await App.api("/api/meta"); App.toast("Saved", "ok"); } catch (e) { App.err(e); }
     };
     const bk = await App.api("/api/backups");
     $("#syBk").innerHTML = `<table class="t"><tr><th>Saved</th><th>Before</th><th class="num">Cranes</th><th class="num">Versions</th><th></th></tr>${bk.map(x => `<tr><td class="small">${App.fmtTime(x.ts)}</td><td class="small">${h(x.reason)}</td><td class="num">${x.cranes}</td><td class="num">${x.versions}</td><td><button class="btn sm" data-f="${h(x.file)}">Restore…</button></td></tr>`).join("") || `<tr><td class="empty">none yet</td></tr>`}</table>`;

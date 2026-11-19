@@ -9,7 +9,7 @@ const SVGNS = "http://www.w3.org/2000/svg";
 const CT = {
   ok: "#5ef0a0", idle: "#4d6a7d", off: "#3a4f5e", warn: "#ffb547", alarm: "#ff6b6b", cyan: "#3fd0ff",
   prog: {Retrofit: "#4aa3ff", New: "#b38cff", ZPMC: "#ff7fbf"},
-  LANE_L: 560, LW: 34, LG: 18, TG: 64, CH: 40,
+  LANE_L: 600, LW: 40, LG: 24, TG: 70, CH: 60, CW: 11,
 };
 const isoP = (x, y, z) => [x + z * 0.866, -y - z * 0.5];
 const isoPts = a => a.map(p => isoP(p[0], p[1], p[2]).map(v => v.toFixed(1)).join(",")).join(" ");
@@ -36,6 +36,8 @@ const MapView = {
   hiddenT: new Set(JSON.parse(localStorage.getItem("cdm.hiddenT") || "[]")),
   feed: [], prev: null, sceneSig: null, cranes: {}, particles: [], raf: null, replay: null, timer: null,
   vb: null, vb0: null, lastPos: {},
+  layoutMode: localStorage.getItem("cdm.yardLayout") || "slots",   // slots | real
+  focus: null,                                                      // null | w | c | n
 
   render(el) {
     el.innerHTML = `<div class="cty">
@@ -49,7 +51,7 @@ const MapView = {
       </header>
       <div class="cty-l">
         <aside class="cty-side">
-          <div class="cty-panel"><h4>Terminals &amp; lanes</h4><div id="ctyTerms"></div></div>
+          <div class="cty-panel" id="ctyCtx"><h4 id="ctyCtxH">Terminals &amp; lanes</h4><div id="ctyTerms"></div></div>
           <div class="cty-panel"><h4>Collector</h4><div id="ctyCol"></div></div>
           <div class="cty-panel"><h4>Live events</h4><div id="ctyFeed" class="cty-feed"></div></div>
         </aside>
@@ -57,6 +59,8 @@ const MapView = {
           <div id="replayBar" class="cty-panel hidden" style="margin-bottom:10px"></div>
           <div class="cty-wrap" id="ctyWrap">
             <div id="mapBox"></div>
+            <div class="cty-layout" id="ctyLayout" title="How cranes are placed along the lane">
+              <button data-l="slots" class="${this.layoutMode === "slots" ? "on" : ""}">Slots</button><button data-l="real" class="${this.layoutMode === "real" ? "on" : ""}">Real position</button></div>
             <div class="cty-zoom" id="ctyZoom"><button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">−</button><button data-z="fit" title="Fit">⟲</button></div>
             <div class="cty-tip hidden" id="ctyTip"></div>
           </div>
@@ -75,6 +79,11 @@ const MapView = {
       this.stopReplay(false); this.sceneSig = null; this.setupReplayBar(); this.update(App.live);
     });
     $$("#ctyZoom button").forEach(b => b.onclick = () => this.zoom(b.dataset.z === "in" ? 0.75 : b.dataset.z === "out" ? 1.33 : 0));
+    $$("#ctyLayout button").forEach(b => b.onclick = () => {
+      this.layoutMode = b.dataset.l; localStorage.setItem("cdm.yardLayout", this.layoutMode);
+      $$("#ctyLayout button").forEach(x => x.classList.toggle("on", x === b));
+      this.sceneSig = null; this.update(App.live);
+    });
     this.sceneSig = null; this.prev = null; this.particles = [];
     this.setupReplayBar();
     this.startLoop();
@@ -89,6 +98,7 @@ const MapView = {
   update(live) {
     if (!$(".cty") || !live) return;
     $("#ctyZoom").classList.toggle("hidden", this.mode === "network");
+    $("#ctyLayout").classList.toggle("hidden", this.mode !== "yard");
     this.panels(live);
     this.events(live);
     if (this.mode === "yard") { this.yard(live.cranes.filter(c => !this.hiddenT.has(c.terminal)), false); this.spawn(live); }
@@ -113,6 +123,9 @@ const MapView = {
     const conn = $("#ctyConn");
     conn.className = "cty-conn" + (c.up ? "" : " bad");
     conn.textContent = (c.up ? "LIVE " : "COLLECTOR DOWN ") + App.fmtTime(live.now, true, false);
+    if (this.focus) { this.focusPanel(live); }
+    else {
+    $("#ctyCtxH").textContent = "Terminals & lanes";
     // terminals & lanes
     const all = App.live.cranes;
     const terms = Object.keys(App.meta.terminals).filter(t => !App.terminal || t === App.terminal);
@@ -128,6 +141,7 @@ const MapView = {
     }).join("") + `<div class="cty-pbtns"><button class="cty-btn" data-all="1">Show all</button><button class="cty-btn" data-all="0">Hide all</button></div>`;
     $$("#ctyTerms input[data-t]").forEach(i => i.onchange = () => { i.checked ? this.hiddenT.delete(i.dataset.t) : this.hiddenT.add(i.dataset.t); this.saveHidden(); });
     $$("#ctyTerms [data-all]").forEach(b => b.onclick = () => { terms.forEach(t => b.dataset.all === "1" ? this.hiddenT.delete(t) : this.hiddenT.add(t)); this.saveHidden(); });
+    }
     // collector panel
     const st = !c.up ? ["DOWN", "red", "The collector service does not answer - no data is being collected. The platform's watchdog is restarting it."] :
       w.healthy === false ? ["BUFFERING", "amb", `InfluxDB cannot be reached. ${App.num(w.buffered)} points are kept in the outage buffer and sent in order when it is back.`] :
@@ -136,6 +150,74 @@ const MapView = {
     $("#ctyCol").innerHTML = `<div class="cty-big ${st[1]}">${st[0]}</div><p>${st[2]}</p>
       <div class="cty-mini"><span>Listeners</span><b>${c.listeners ?? "–"}</b><span>Since</span><b>${c.started ? App.fmtTime(c.started, false) : "–"}</b><span>Buffer</span><b>${App.num(w.buffered || 0)}</b><span>Pending</span><b>${live.pending.length}</b></div>`;
   },
+  /* ── context panel: Westermo / Collector PC / NAS ── */
+  setFocus(k) {
+    this.focus = this.focus === k ? null : k;
+    this.markFocus();
+    this.panels(App.live);
+  },
+  markFocus() { $$("#ctySvg .cty-bld").forEach(g => g.classList.toggle("sel", g.dataset.b === this.focus)); },
+  focusPanel(live) {
+    const M = App.meta, c = live.collector, w = live.writer || {}, cr = live.cranes;
+    const liveN = cr.filter(x => x.live).length, pm = cr.reduce((s, x) => s + (x.pkt_min || 0), 0);
+    const row = (k, v, cls = "") => `<span>${k}</span><b class="${cls}">${v}</b>`;
+    const back = `<button class="cty-btn" id="fcBack" title="Back to terminals &amp; lanes">← Back</button>`;
+    let title = "", html = "";
+    if (this.focus === "w") {
+      const blockedNow = cr.filter(x => (x.recent_intruders || []).length);
+      const blockedTot = cr.reduce((s, x) => s + (x.dropped_ip || 0), 0);
+      title = "Westermo router";
+      html = `<div class="cty-big ${blockedNow.length ? "amb" : "ok"}">${blockedNow.length ? "BLOCKING " + blockedNow.length : "FORWARDING"}</div>
+        <p>Forwards each crane's UDP port to the collector PC. The list shows what the crane register <b>expects</b> the router to forward - the platform cannot read the router's own rules, so a crane that never sends may also mean a missing rule on the Westermo.</p>
+        <div class="cty-mini">${row("Router", h(M.westermo_ip || "–"))}${row("Forwards to", h(M.collector_ip || "–"))}${row("PLC send port", "4963 → crane port")}${row("Crane ports", cr.length)}${row("Packets / min", App.num(pm))}${row("Blocked (IP lock)", App.num(blockedTot), blockedTot ? "a" : "")}</div>
+        <div class="cty-ftbl"><table><tr><th>Port</th><th>Crane</th><th>Registered IP</th><th>Now</th></tr>${[...cr].sort((a, b) => a.port - b.port).map(x => {
+          const intr = (x.recent_intruders || []).length;
+          return `<tr class="${intr ? "bad" : ""}" data-c="${h(x.crane)}"><td>${x.port}</td><td><b>${h(x.crane)}</b></td><td>${h(x.ip || "–")}</td><td><i style="background:${this.col(x)}"></i>${intr ? "✕ " + h(x.recent_intruders.join(", ")) : x.live ? (x.pkt_min || 0) + "/min" : h(STATE_SHORT[x.state] || x.state)}</td></tr>`;
+        }).join("")}</table></div>
+        <div class="cty-pbtns">${back}<button class="cty-btn" id="fcGo1">Crane register</button></div>`;
+    } else if (this.focus === "c") {
+      const st = !c.up ? ["DOWN", "red"] : w.healthy === false ? ["BUFFERING", "amb"] : liveN ? ["COLLECTING", "ok"] : ["STANDBY", ""];
+      const up = c.started ? (Date.now() / 1000 - c.started) : 0;
+      title = "Collector PC";
+      html = `<div class="cty-big ${st[1]}">${st[0]}</div>
+        <p>Windows service <b>CraneDataCollector</b> on ${h(M.collector_ip || "this PC")}: one UDP listener per crane port, IP lock, packet versions, outage buffer. It keeps running when this page is closed.</p>
+        <div class="cty-mini">${row("Service", c.up ? "running · pid " + c.pid : "NOT RESPONDING", c.up ? "" : "r")}${row("Running since", c.started ? App.fmtTime(c.started) : "–")}${row("Uptime", up ? (up > 86400 ? (up / 86400).toFixed(1) + " days" : (up / 3600).toFixed(1) + " h") : "–")}
+          ${row("Listeners", (c.listeners ?? "–") + (c.threads_ok === false ? " (one stopped!)" : ""))}${row("Cranes live", liveN + " / " + cr.length)}${row("Packets / min", App.num(pm))}
+          ${row("Written since start", App.num(w.written_total || 0))}${row("Outage buffer", App.num(w.buffered || 0) + " (" + ((w.buffer_bytes || 0) / 1e6).toFixed(1) + " MB)", w.buffered ? "a" : "")}
+          ${row("Rejected by InfluxDB", App.num(w.rejected_total || 0), w.rejected_total ? "a" : "")}${row("Waiting for refresh", live.pending.length ? h(live.pending.join(", ")) : "none", live.pending.length ? "a" : "")}
+          ${row("Last reload", c.last_reload ? App.fmtTime(c.last_reload) : "–")}${row("Listening on", h(M.listen_address || "0.0.0.0") + " (UDP)")}</div>
+        <div class="cty-pbtns">${back}<button class="cty-btn primary" id="fcRef">⟳ Refresh collector</button><button class="cty-btn" id="fcGo2">Settings</button></div>`;
+    } else {
+      const st = w.healthy === false ? ["UNREACHABLE", "red"] : w.healthy ? ["WRITES OK", "ok"] : ["WAITING", ""];
+      title = "NAS · InfluxDB";
+      html = `<div class="cty-big ${st[1]}">${st[0]}</div>
+        <p>Every packet is stored here exactly as before (same bucket, measurement, tag and fields). If it cannot be reached, data waits in the collector's outage buffer and is sent in time order later.</p>
+        <div class="cty-mini">${row("Address", h(M.influx_url || "–"))}${row("Organisation", h(M.influx_org || "–"))}${row("Bucket", h(M.influx_bucket || "–"))}${row("Measurement", h(M.influx_measurement || "–"))}${row("Tag", "crane_id")}
+          ${row("Last write OK", w.last_ok ? App.ago(w.last_ok) : "–")}${row("Written since start", App.num(w.written_total || 0))}${row("Rejected points", App.num(w.rejected_total || 0), w.rejected_total ? "a" : "")}${row("Waiting in buffer", App.num(w.buffered || 0), w.buffered ? "a" : "")}</div>
+        ${w.last_error ? `<p class="cty-err">Last error ${App.fmtTime(w.last_error_ts, true, false)}: ${h(w.last_error)}</p>` : ""}
+        <p id="fcTestRes" class="small"></p>
+        <div class="cty-pbtns">${back}<button class="cty-btn" id="fcTest">Test connection</button><button class="cty-btn" id="fcGo3">Settings</button></div>`;
+    }
+    $("#ctyCtxH").textContent = title;
+    const keep = $("#fcTestRes") ? $("#fcTestRes").innerHTML : "";
+    const sc = $("#ctyTerms .cty-ftbl") ? $("#ctyTerms .cty-ftbl").scrollTop : 0;
+    $("#ctyTerms").innerHTML = html;
+    if (sc && $("#ctyTerms .cty-ftbl")) $("#ctyTerms .cty-ftbl").scrollTop = sc;
+    if (keep && $("#fcTestRes")) $("#fcTestRes").innerHTML = keep;
+    const on = (id, fn) => { const b = $("#" + id); if (b) b.onclick = fn; };
+    on("fcBack", () => this.setFocus(this.focus));
+    on("fcGo1", () => location.hash = "#config/cranes");
+    on("fcGo2", () => location.hash = "#config/collector");
+    on("fcGo3", () => location.hash = "#config/influx");
+    on("fcRef", () => Config.refreshCollector());
+    on("fcTest", async () => {
+      $("#fcTestRes").textContent = "testing…";
+      try { const r = await App.api("/api/influx/test", {json: {}}); $("#fcTestRes").innerHTML = r.ok ? `<span style="color:${CT.ok}">✓ reachable · ${h(r.message || "")} · bucket ${h(r.bucket || "")}</span>` : `<span style="color:${CT.alarm}">✕ ${h(r.message)}</span>`; }
+      catch (e) { $("#fcTestRes").innerHTML = `<span style="color:${CT.alarm}">✕ ${h(e.message)}</span>`; }
+    });
+    $$("#ctyTerms tr[data-c]").forEach(tr => tr.onclick = () => App.openCrane(tr.dataset.c));
+  },
+
   saveHidden() { localStorage.setItem("cdm.hiddenT", JSON.stringify([...this.hiddenT])); this.sceneSig = null; this.update(App.live); },
 
   events(live) {
@@ -182,10 +264,20 @@ const MapView = {
     return (Math.min(Math.max(g, lo), hi) - lo) / (hi - lo) * CT.LANE_L;
   },
 
+  laneSlots(t, lane) {
+    const cfg = App.meta.terminals[t] || {};
+    const n = +((cfg.lane_counts || {})[lane] || cfg.cranes_per_lane || 14);
+    const reg = (App.live ? App.live.cranes : []).filter(c => c.terminal === t && c.crane[0] === lane).map(c => +c.crane.slice(2) || 0);
+    return Math.max(n, ...reg, 1);
+  },
+  slotX(t, lane, num) { const n = this.laneSlots(t, lane); return 14 + (num - 0.5) / n * (CT.LANE_L - 28); },
+
   yard(cranes, isReplay) {
     const L = this.layout(cranes);
+    const slots = this.layoutMode === "slots" && !isReplay;
     cranes.forEach(c => { const g = (c.values || {}).In_GANTRY1; if (typeof g === "number" && g > (this.gmax || App.meta.yard.gantry_max)) this.gmax = Math.ceil(g / 100) * 100 + 100; });
-    const sig = (isReplay ? "R" : "L") + JSON.stringify([L.lanes.map(l => l.key), cranes.map(c => c.crane), this.gmax]);
+    const sig = (isReplay ? "R" : "L") + (slots ? "S" : "P") + JSON.stringify([L.lanes.map(l => l.key), cranes.map(c => c.crane), this.gmax]);
+    this.slotsOn = slots;
     if (sig !== this.sceneSig || !$("#ctySvg")) { this.sceneSig = sig; this.build(L, cranes, isReplay); }
     this.L = L;
     const parked = {};
@@ -197,7 +289,9 @@ const MapView = {
       if (typeof g === "number") this.lastPos[c.crane] = g; else g = this.lastPos[c.crane];
       const lk = o.lane.key;
       o.hasPos = typeof g === "number";
-      o.tx = o.hasPos ? this.gx(g) : CT.LANE_L - 10 - 18 * (parked[lk] = (parked[lk] ?? -1) + 1);
+      o.g_m = o.hasPos ? g : null;
+      o.tx = slots ? this.slotX(c.terminal, c.crane[0], +c.crane.slice(2) || 1) :
+        (o.hasPos ? this.gx(g) : CT.LANE_L - 14 - 34 * (parked[lk] = (parked[lk] ?? -1) + 1));
       const yd = App.meta.yard;
       o.tt = typeof v.In_TROLLEYPOMUX === "number" ? Math.min(Math.max(v.In_TROLLEYPOMUX / yd.trolley_max, 0), 1) : (o.tt ?? 0.5);
       o.th = typeof v.In_HOIST === "number" ? Math.min(Math.max(v.In_HOIST / yd.hoist_max, 0), 1) : (o.th ?? 0.85);
@@ -205,16 +299,28 @@ const MapView = {
       if (o.cx === undefined) { o.cx = o.tx; o.ct = o.tt; o.ch = o.th; }
       o.c = c;
       const col = this.col(c), grp = this.group(c);
-      o.g.setAttribute("class", `ycrane st-${grp}${o.hasPos ? "" : " ghost"}`);
-      o.gb.setAttribute("class", `ycrane-b st-${grp}${o.hasPos ? "" : " ghost"}`);
+      const ghost = !slots && !o.hasPos ? " ghost" : "";
+      o.g.setAttribute("class", `ycrane st-${grp}${ghost}${this.focusCrane === c.crane ? " sel" : ""}`);
+      o.gb.setAttribute("class", `ycrane-b st-${grp}${ghost}`);
       o.frame.forEach(e => e.setAttribute("stroke", grp === "ok" ? CT.cyan : col));
       o.beacon.setAttribute("fill", col); o.halo.setAttribute("fill", col);
       o.tag.textContent = c.crane;
       o.sub.textContent = isReplay ? (o.hasPos ? `${g.toFixed(0)} m · step ${v.Step ?? "–"}` : "no data") :
+        slots ? (c.state === "OK" ? (o.hasPos ? `${g.toFixed(0)} m` : "OK") : (STATE_SHORT[c.state] || c.state)) :
         (c.state === "OK" ? "" : (STATE_SHORT[c.state] || c.state) + (o.hasPos ? "" : " · no pos."));
       o.sub.setAttribute("fill", grp === "ok" ? "#9fe9ff" : col);
       o.box.style.display = o.locked ? "" : "none";
     });
+    if (!slots) {
+      const MIN = CT.CW * 2 + 12, byLane = {};
+      Object.values(this.cranes).forEach(o => (byLane[o.lane.key] = byLane[o.lane.key] || []).push(o));
+      Object.values(byLane).forEach(list => {
+        list.sort((a, b) => a.tx - b.tx);
+        for (let i = 1; i < list.length; i++) list[i].tx = Math.max(list[i].tx, list[i - 1].tx + MIN);
+        let hi = CT.LANE_L - 10;
+        for (let i = list.length - 1; i >= 0; i--) { list[i].tx = Math.min(list[i].tx, hi); hi = list[i].tx - MIN; }
+      });
+    }
     this.infra(isReplay);
   },
 
@@ -274,28 +380,43 @@ const MapView = {
     L.terms.forEach(t => {
       const ls = L.lanes.filter(l => l.t === t);
       const tc = cranes.filter(c => c.terminal === t);
-      this.label(labels, [CT.LANE_L * 0.62, 6, ls[ls.length - 1].z0 + CT.LW], 70, `${(App.meta.terminals[t] || {}).name || t}`.toUpperCase(), `${tc.length} REGISTERED · LANES ${ls.map(x => x.l).join("")}`, CT.cyan, "tl_" + t);
+      const lab = this.label(labels, [CT.LANE_L * 0.62, 6, ls[ls.length - 1].z0 + CT.LW], 80, `${(App.meta.terminals[t] || {}).name || t}`.toUpperCase(), `${tc.length} REGISTERED · LANES ${ls.map(x => x.l).join("")} · CLICK TO ZOOM`, CT.cyan, "tl_" + t);
+      lab.style.cursor = "pointer";
+      lab.addEventListener("click", () => { if (this.dragged) return; let b = null; $$("#ctySvg [data-t='" + t + "']").forEach(e => { const r = e.getBBox(); b = b ? {x: Math.min(b.x, r.x), y: Math.min(b.y, r.y), x2: Math.max(b.x2, r.x + r.width), y2: Math.max(b.y2, r.y + r.height)} : {x: r.x, y: r.y, x2: r.x + r.width, y2: r.y + r.height}; }); if (b) this.zoomTo({x: b.x, y: b.y, width: b.x2 - b.x, height: b.y2 - b.y}); });
     });
     this.fit();
     this.bindPanZoom();
   },
 
   drawLane(l, cranes, par, labels, front) {
-    const g = sv("g", {}, par), z0 = l.z0, z1 = l.z0 + CT.LW, Lx = CT.LANE_L;
+    const g = sv("g", {"data-t": l.t}, par), z0 = l.z0, z1 = l.z0 + CT.LW, Lx = CT.LANE_L;
     const backG = sv("g", {"pointer-events": "none"}, g);   // crane back legs: behind the stacks
     // rails
     [z0 + 1.5, z1 - 1.5].forEach(z => { iline([-4, .4, z], [Lx + 8, .4, z], {stroke: "#3fd0ff", "stroke-width": 1.1, opacity: .55}, g); iline([-4, .4, z], [Lx + 8, .4, z], {stroke: "#3fd0ff", "stroke-width": 4, opacity: .07, filter: "url(#cg2)"}, g); });
     // container stacks between the rails (deterministic per lane)
     const R = rng(hashStr(l.key)), pal = [["#1c3547", "#132836", "#24445a"], ["#2b2f3b", "#1d2029", "#383d4b"], ["#3a2a24", "#281d19", "#4a3730"], ["#1f3a33", "#152923", "#2a4b42"]];
-    for (let x = 6; x < Lx - 14; x += 15 + R() * 6) {
-      if (R() < 0.22) continue;
-      const len = 11 + R() * 3, tiers = 1 + Math.floor(R() * 4), c = pal[Math.floor(R() * pal.length)];
-      for (const row of [0, 1]) { if (R() < 0.15) continue; const zz = z0 + 6 + row * 9.5; box(x, x + len, 0, tiers * 2.8, zz, zz + 8, c, g); }
+    for (let x = 6; x < Lx - 14; x += 18 + R() * 8) {
+      if (R() < 0.35) continue;
+      const len = 12 + R() * 3, tiers = 1 + Math.floor(R() * 3), c = pal[Math.floor(R() * pal.length)];
+      for (const row of [0, 1]) { if (R() < 0.3) continue; const zz = z0 + 9 + row * 12; box(x, x + len, 0, tiers * 2.4, zz, zz + 10, c, g); }
+    }
+    // slot mode: a faint numbered pad for every crane position of the lane (shows the roster)
+    if (this.slotsOn) {
+      const n = this.laneSlots(l.t, l.l), have = new Set(cranes.map(c => +c.crane.slice(2)));
+      for (let k = 1; k <= n; k++) {
+        const x = this.slotX(l.t, l.l, k), digit = l.t.slice(-1);
+        quad([[x - CT.CW, .5, z0 + 1], [x + CT.CW, .5, z0 + 1], [x + CT.CW, .5, z0 + CT.LW - 1], [x - CT.CW, .5, z0 + CT.LW - 1]],
+          {fill: have.has(k) ? "rgba(63,208,255,.05)" : "none", stroke: "#2a6f92", "stroke-width": .6, "stroke-opacity": have.has(k) ? .5 : .35, "stroke-dasharray": "3 3"}, g);
+        const q = isoP(x, 0, z0 - 6);
+        sv("text", {x: q[0], y: q[1] + 3, class: "cty-slot" + (have.has(k) ? " on" : "")}, g, `${l.l}${digit}${String(k).padStart(2, "0")}`);
+      }
     }
     // lane letter at the far end + gantry scale on the front lane of each terminal
     const p = isoP(Lx + 18, 0, z0 + CT.LW / 2);
-    sv("text", {x: p[0], y: p[1] + 5, class: "cty-lane"}, g, l.l);
-    if (front) {
+    const lt = sv("text", {x: p[0], y: p[1] + 5, class: "cty-lane"}, g, l.l);
+    lt.appendChild(sv("title", {}, null, `Lane ${l.l} - click to zoom in`));
+    lt.addEventListener("click", e => { e.stopPropagation(); if (!this.dragged) this.zoomTo(g.getBBox()); });
+    if (front && !this.slotsOn) {
       const yd = App.meta.yard, hi = Math.max(yd.gantry_max, this.gmax || 0);
       for (let gm = Math.ceil(yd.gantry_min / 500) * 500; gm <= hi; gm += 500) { const x = this.gx(gm); iline([x, .3, z0 - 2], [x, .3, z0 - 6], {stroke: "#2a6f92", "stroke-width": .8}, g); const q = isoP(x, 0, z0 - 9); sv("text", {x: q[0], y: q[1] + 3, class: "cty-tick"}, g, gm + " m"); }
     }
@@ -304,41 +425,42 @@ const MapView = {
   },
 
   drawCrane(c, l, par, labels, backPar) {
-    const z0 = l.z0, LW = CT.LW, H = CT.CH, W = 7;
+    const z0 = l.z0, LW = CT.LW, H = CT.CH, W = CT.CW;
     const gb = sv("g", {class: "ycrane-b"}, backPar);
     const g = sv("g", {class: "ycrane", "data-c": c.crane}, par);
     const frame = [];
-    const st = {"stroke-width": 1.5, "stroke-linecap": "round"};
-    // back legs + sill (separate layer, drawn before the container stacks)
+    const st = {"stroke-width": 2.2, "stroke-linecap": "round"};
+    // back legs + sill + diagonal brace (separate layer, drawn before the container stacks)
     frame.push(iline([-W, 0, z0 + LW], [-W, H, z0 + LW], st, gb), iline([W, 0, z0 + LW], [W, H, z0 + LW], st, gb));
-    frame.push(iline([-W, 1.5, z0 + LW], [W, 1.5, z0 + LW], {"stroke-width": 1}, gb));
+    frame.push(iline([-W, 2, z0 + LW], [W, 2, z0 + LW], {"stroke-width": 1.4}, gb));
+    frame.push(iline([-W, H * .55, z0 + LW], [W, H * .85, z0 + LW], {"stroke-width": .9, opacity: .6}, gb));
     // girder deck
-    quad([[-W - 1, H, z0 - 3], [W + 1, H, z0 - 3], [W + 1, H, z0 + LW + 3], [-W - 1, H, z0 + LW + 3]], {fill: "#0f2232", stroke: "#3fd0ff", "stroke-opacity": .35, "stroke-width": .5}, g);
-    quad([[-W - 1, H - 2.5, z0 - 3], [W + 1, H - 2.5, z0 - 3], [W + 1, H, z0 - 3], [-W - 1, H, z0 - 3]], {fill: "#16314a"}, g);
-    quad([[W + 1, H - 2.5, z0 - 3], [W + 1, H - 2.5, z0 + LW + 3], [W + 1, H, z0 + LW + 3], [W + 1, H, z0 - 3]], {fill: "#0c1a28"}, g);
+    quad([[-W - 1.5, H, z0 - 4], [W + 1.5, H, z0 - 4], [W + 1.5, H, z0 + LW + 4], [-W - 1.5, H, z0 + LW + 4]], {fill: "#0f2232", stroke: "#3fd0ff", "stroke-opacity": .4, "stroke-width": .6}, g);
+    quad([[-W - 1.5, H - 3.5, z0 - 4], [W + 1.5, H - 3.5, z0 - 4], [W + 1.5, H, z0 - 4], [-W - 1.5, H, z0 - 4]], {fill: "#16314a"}, g);
+    quad([[W + 1.5, H - 3.5, z0 - 4], [W + 1.5, H - 3.5, z0 + LW + 4], [W + 1.5, H, z0 + LW + 4], [W + 1.5, H, z0 - 4]], {fill: "#0c1a28"}, g);
     // program band on the girder side + machinery house
-    quad([[W + 1.1, H - 2, z0 + 2], [W + 1.1, H - 2, z0 + LW - 2], [W + 1.1, H - .6, z0 + LW - 2], [W + 1.1, H - .6, z0 + 2]], {fill: CT.prog[c.program] || "#5d7d90", opacity: .9}, g);
-    box(-3.5, 3.5, H, H + 4.5, z0 + LW - 8, z0 + LW - 2, ["#18304a", "#0e1c2a", "#1f3b56"], g, "#3fd0ff");
+    quad([[W + 1.6, H - 3, z0 + 2], [W + 1.6, H - 3, z0 + LW - 2], [W + 1.6, H - .8, z0 + LW - 2], [W + 1.6, H - .8, z0 + 2]], {fill: CT.prog[c.program] || "#5d7d90", opacity: .95}, g);
+    box(-5.5, 5.5, H, H + 7, z0 + LW - 11, z0 + LW - 2, ["#18304a", "#0e1c2a", "#1f3b56"], g, "#3fd0ff");
     // trolley (moves across the lane) with ropes and spreader (moves up/down)
     const tg = sv("g", {class: "ytrolley"}, g);
-    box(-4, 4, H, H + 3, z0 - 2.5, z0 + 2.5, ["#1f8fd6", "#176fae", "#3fd0ff"], tg);
-    const rope1 = sv("line", {stroke: "#7fa6ba", "stroke-width": .5}, tg), rope2 = sv("line", {stroke: "#7fa6ba", "stroke-width": .5}, tg);
+    box(-6.5, 6.5, H, H + 4.5, z0 - 3.5, z0 + 3.5, ["#1f8fd6", "#176fae", "#3fd0ff"], tg);
+    const rope1 = sv("line", {stroke: "#9fc3d6", "stroke-width": .7}, tg), rope2 = sv("line", {stroke: "#9fc3d6", "stroke-width": .7}, tg);
     const spr = sv("g", {}, tg);
-    box(-4.5, 4.5, 0, 1, z0 - 1.5, z0 + 1.5, ["#d48a1e", "#a86a12", "#ffb547"], spr);
+    box(-7.5, 7.5, 0, 1.5, z0 - 2.2, z0 + 2.2, ["#d48a1e", "#a86a12", "#ffb547"], spr);
     const cbox = sv("g", {}, spr);
-    box(-6, 6, -5, -.2, z0 - 2.2, z0 + 2.2, ["#2f5a78", "#214358", "#3d7398"], cbox, "#3fd0ff");
+    box(-9.5, 9.5, -7.5, -.3, z0 - 3, z0 + 3, ["#2f5a78", "#214358", "#3d7398"], cbox, "#3fd0ff");
     // front legs + sill (drawn last: in front)
     frame.push(iline([-W, 0, z0], [-W, H, z0], st, g), iline([W, 0, z0], [W, H, z0], st, g));
-    frame.push(iline([-W, 1.5, z0], [W, 1.5, z0], {"stroke-width": 1}, g));
-    frame.push(iline([-W, H - 1, z0], [-W, H - 1, z0 + LW], {"stroke-width": .9}, g), iline([W, H - 1, z0], [W, H - 1, z0 + LW], {"stroke-width": .9}, g));
+    frame.push(iline([-W, 2, z0], [W, 2, z0], {"stroke-width": 1.4}, g));
+    frame.push(iline([-W, H - 1.5, z0], [-W, H - 1.5, z0 + LW], {"stroke-width": 1.2}, g), iline([W, H - 1.5, z0], [W, H - 1.5, z0 + LW], {"stroke-width": 1.2}, g));
     // beacon + tag
-    const bp = isoP(0, H + 8, z0 + LW / 2);
-    const halo = sv("circle", {cx: bp[0], cy: bp[1], r: 7, opacity: .28, filter: "url(#cg2)", class: "yhalo"}, g);
-    const beacon = sv("circle", {cx: bp[0], cy: bp[1], r: 2.3, filter: "url(#cg1)"}, g);
-    iline([0, H + 4.5, z0 + LW / 2], [0, H + 7, z0 + LW / 2], {stroke: "#5b7a8e", "stroke-width": .8}, g);
-    const tag = sv("text", {x: bp[0], y: bp[1] - 6, class: "ytag"}, g, c.crane);
-    const sub = sv("text", {x: bp[0], y: bp[1] - 15.5, class: "ysub"}, g, "");
-    const hit = sv("rect", {x: bp[0] - 12, y: bp[1] - 14, width: 34, height: 66, fill: "transparent"}, g);
+    const bp = isoP(0, H + 12, z0 + LW / 2);
+    const halo = sv("circle", {cx: bp[0], cy: bp[1], r: 10, opacity: .3, filter: "url(#cg2)", class: "yhalo"}, g);
+    const beacon = sv("circle", {cx: bp[0], cy: bp[1], r: 3.4, filter: "url(#cg1)"}, g);
+    iline([0, H + 7, z0 + LW / 2], [0, H + 10.5, z0 + LW / 2], {stroke: "#5b7a8e", "stroke-width": 1}, g);
+    const tag = sv("text", {x: bp[0], y: bp[1] - 8, class: "ytag"}, g, c.crane);
+    const sub = sv("text", {x: bp[0], y: bp[1] - 21, class: "ysub"}, g, "");
+    const hit = sv("rect", {x: bp[0] - 16, y: bp[1] - 20, width: 46, height: 96, fill: "transparent"}, g);
     g.addEventListener("mouseenter", e => this.tip(c.crane, e));
     g.addEventListener("mousemove", e => this.tipMove(e));
     g.addEventListener("mouseleave", () => $("#ctyTip").classList.add("hidden"));
@@ -346,13 +468,16 @@ const MapView = {
     this.cranes[c.crane] = {g, gb, tg, spr, box: cbox, rope1, rope2, frame, beacon, halo, tag, sub, lane: l, z0, H};
   },
 
-  drawInfra(par, labels) {
+  drawInfra(par0, labels) {
     const G = this.geo, z = G.zMid;
+    const bg = k => { const g = sv("g", {class: "cty-bld", "data-b": k}, par0); g.addEventListener("click", e => { e.stopPropagation(); if (!this.dragged) this.setFocus(k); }); return g; };
     // Westermo router
-    box(G.wx - 12, G.wx + 12, 0, 7, z - 9, z + 9, ["#0f5c55", "#0a3f3a", "#147a70"], par, "#5ef0a0");
-    for (let i = 0; i < 4; i++) { const q = isoP(G.wx - 8 + i * 5, 4, z - 9.1); sv("circle", {cx: q[0], cy: q[1], r: .9, fill: i < 2 ? "#5ef0a0" : "#ffb547", class: "cty-led"}, par); }
+    let par = bg("w");
+    box(G.wx - 15, G.wx + 15, 0, 9, z - 11, z + 11, ["#0f5c55", "#0a3f3a", "#147a70"], par, "#5ef0a0");
+    for (let i = 0; i < 4; i++) { const q = isoP(G.wx - 10 + i * 6, 5, z - 11.1); sv("circle", {cx: q[0], cy: q[1], r: 1.1, fill: i < 2 ? "#5ef0a0" : "#ffb547", class: "cty-led"}, par); }
     this.label(labels, [G.wx, 10, z + 9], 46, "WESTERMO", "PORT FORWARD → .237", CT.ok, "lab_w");
     // Collector PC building with beam
+    par = bg("c");
     const x0 = G.colX0, x1 = G.colX1, zz0 = z - 32, zz1 = z + 32, Hb = 58;
     quad([[x0, 0, zz0], [x1, 0, zz0], [x1, Hb, zz0], [x0, Hb, zz0]], {fill: "url(#cfFront)", stroke: "#3fd0ff", "stroke-opacity": .5, "stroke-width": .8}, par);
     quad([[x1, 0, zz0], [x1, 0, zz1], [x1, Hb, zz1], [x1, Hb, zz0]], {fill: "#0b1824", stroke: "#3fd0ff", "stroke-opacity": .5, "stroke-width": .8}, par);
@@ -371,9 +496,10 @@ const MapView = {
     this.colRing = sv("ellipse", {cx: bt[0], cy: bt[1] - 1, rx: 12, ry: 6, fill: "none", stroke: CT.ok, "stroke-width": 1.2, opacity: .7, filter: "url(#cg1)"}, par);
     // IP-lock gate (blocked packets stop here)
     const gp = isoP(x1 + 6, 2, z);
-    this.gate = sv("circle", {cx: gp[0], cy: gp[1], r: 5, fill: "none", stroke: CT.alarm, "stroke-width": 1.4, opacity: 0, filter: "url(#cg1)"}, par);
+    this.gate = sv("circle", {cx: gp[0], cy: gp[1], r: 5, fill: "none", stroke: CT.alarm, "stroke-width": 1.4, opacity: 0, filter: "url(#cg1)"}, par0);
     this.label(labels, [(x0 + x1) / 2, Hb + 30, zz1], 64, "COLLECTOR PC", "", CT.ok, "lab_c");
     // NAS / InfluxDB
+    par = bg("n");
     const n0 = G.nasX0, n1 = G.nasX1, nz0 = z - 26, nz1 = z + 26, Hn = 34;
     quad([[n0, 0, nz0], [n1, 0, nz0], [n1, Hn, nz0], [n0, Hn, nz0]], {fill: "url(#cfFront)", stroke: "#5ef0a0", "stroke-opacity": .45, "stroke-width": .8}, par);
     quad([[n1, 0, nz0], [n1, 0, nz1], [n1, Hn, nz1], [n1, Hn, nz0]], {fill: "#0b1824", stroke: "#5ef0a0", "stroke-opacity": .45, "stroke-width": .8}, par);
@@ -383,6 +509,8 @@ const MapView = {
     for (let i = 0; i < 3; i++) { sv("ellipse", {cx: dc[0], cy: dc[1] - i * 7, rx: 18, ry: 9, fill: i === 2 ? "#1f4a42" : "#163a34", stroke: "#5ef0a0", "stroke-opacity": .6, "stroke-width": .8}, par); }
     this.nasGlow = sv("ellipse", {cx: dc[0], cy: dc[1] - 14, rx: 18, ry: 9, fill: "#5ef0a0", opacity: .15, filter: "url(#cg2)"}, par);
     this.label(labels, [(n0 + n1) / 2, Hn + 22, nz1], 54, "NAS · INFLUXDB", "", CT.ok, "lab_n");
+    [["lab_w", "w"], ["lab_c", "c"], ["lab_n", "n"]].forEach(([id, k]) => { const e = document.getElementById(id); e.style.cursor = "pointer"; e.addEventListener("click", ev => { ev.stopPropagation(); if (!this.dragged) this.setFocus(k); }); });
+    this.markFocus();
   },
 
   label(par, anchor, lift, title, sub, color, id) {
@@ -450,11 +578,11 @@ const MapView = {
       o.cx += (o.tx - o.cx) * k; o.ct += (o.tt - o.ct) * k; o.ch += (o.th - o.ch) * k;
       o.g.setAttribute("transform", `translate(${o.cx.toFixed(2)},0)`);
       o.gb.setAttribute("transform", `translate(${o.cx.toFixed(2)},0)`);
-      const dz = o.ct * (CT.LW - 4) + 2;
+      const dz = o.ct * (CT.LW - 8) + 4;
       o.tg.setAttribute("transform", `translate(${(dz * 0.866).toFixed(2)},${(-dz * 0.5).toFixed(2)})`);
-      const sy = 2 + o.ch * (o.H - 6);
+      const sy = 9 + o.ch * (o.H - 16);
       o.spr.setAttribute("transform", `translate(0,${(-sy).toFixed(2)})`);
-      const a = isoP(-2.5, o.H, o.z0), b = isoP(-2.5, sy + 1, o.z0), c = isoP(2.5, o.H, o.z0), d = isoP(2.5, sy + 1, o.z0);
+      const a = isoP(-4, o.H, o.z0), b = isoP(-4, sy + 1.5, o.z0), c = isoP(4, o.H, o.z0), d = isoP(4, sy + 1.5, o.z0);
       o.rope1.setAttribute("x1", a[0]); o.rope1.setAttribute("y1", a[1]); o.rope1.setAttribute("x2", b[0]); o.rope1.setAttribute("y2", b[1]);
       o.rope2.setAttribute("x1", c[0]); o.rope2.setAttribute("y1", c[1]); o.rope2.setAttribute("x2", d[0]); o.rope2.setAttribute("y2", d[1]);
       if (o.alarmLabel) o.alarmLabel.setAttribute("transform", `translate(${(o.cx - (o.alarmX ?? o.cx)).toFixed(2)},0)`);
@@ -546,7 +674,19 @@ const MapView = {
     this.vb = this.vb0.slice();
     this.applyVB();
   },
-  applyVB() { this.svg.setAttribute("viewBox", this.vb.map(v => v.toFixed(1)).join(" ")); },
+  applyVB() {
+    this.svg.setAttribute("viewBox", this.vb.map(v => v.toFixed(1)).join(" "));
+    const k = this.vb[2] / (this.svg.clientWidth || 1200);
+    this.svg.classList.toggle("far", k > 1.25);       // far away: hide the small texts
+  },
+  zoomTo(bb) {
+    const pad = 30, r = this.svg.getBoundingClientRect(), asp = r.width / Math.max(1, r.height);
+    let w = bb.width + 2 * pad, hh = bb.height + 2 * pad;
+    if (w / hh < asp) w = hh * asp; else hh = w / asp;
+    const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
+    this.vb = [cx - w / 2, cy - hh / 2, w, hh];
+    this.applyVB();
+  },
   zoom(f, cx, cy) {
     if (!this.vb) return;
     if (!f) { this.vb = this.vb0.slice(); return this.applyVB(); }
