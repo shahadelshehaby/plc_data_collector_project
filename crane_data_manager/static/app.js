@@ -158,9 +158,11 @@ const App = {
   },
 
   async ackAll() {
-    const note = prompt("Acknowledge all active alarms. Note (optional):", "");
-    if (note === null) return;
-    await this.api("/api/alarms/ack_all", {json: {note}});
+    const n = (this.live ? this.live.alarms.filter(a => !a.acked).length : 0);
+    const r = await this.confirm({title: "Acknowledge all alarms", okText: "Acknowledge all",
+      summary: `${n} active alarm${n === 1 ? "" : "s"} will be marked as acknowledged. They stay active until the problem is gone, and they stay in the history.`});
+    if (!r) return;
+    await this.api("/api/alarms/ack_all", {json: {note: ""}});
     this.poll();
   },
 
@@ -234,22 +236,22 @@ const App = {
     return {el: $(".modal", bg), close};
   },
 
-  /* Safety confirmation for every critical action: shows exactly what will
-     change, requires a reason, and for stop / bulk actions a typed word. */
-  confirm({title, summary, danger = false, typed = null, okText = "Confirm", reasonHint = ""}) {
+  /* Confirmation dialog.
+     - normal important actions: "Are you sure?" with a summary, one click.
+     - typed: true (only Stop writing and Remove crane): type CONFIRM first.
+     Every action is still written to the change log. */
+  confirm({title, summary, danger = false, typed = false, okText = "Yes, continue"}) {
     return new Promise(resolve => {
       const m = this.modal({title: (danger ? "⚠ " : "") + title, danger, html: `
         <div class="confirm-box">${summary}</div>
-        <label class="f">Reason (saved in the change log)<textarea id="cfReason" placeholder="${h(reasonHint || "e.g. crane in maintenance / new PLC version installed")}"></textarea></label>
-        ${typed ? `<label class="f" style="margin-top:8px"><span>Type <b class="mono" style="color:var(--text)">${h(typed)}</b> to confirm</span><input id="cfTyped" autocomplete="off"></label>` : ""}
-        <div class="actions"><button class="btn" id="cfNo">Cancel</button><button class="btn ${danger ? "danger" : "primary"}" id="cfYes" disabled>${h(okText)}</button></div>`,
+        ${typed ? `<label class="f" style="margin-top:8px"><span>Type <b class="mono" style="color:var(--text)">CONFIRM</b> to continue</span><input id="cfTyped" autocomplete="off" placeholder="CONFIRM"></label>` : `<div class="muted small">Are you sure you want to make this change?</div>`}
+        <div class="actions"><button class="btn" id="cfNo">Cancel</button><button class="btn ${danger ? "danger" : "primary"}" id="cfYes" ${typed ? "disabled" : ""}>${h(okText)}</button></div>`,
         onClose: () => resolve(null)});
-      const yes = $("#cfYes", m.el), r = $("#cfReason", m.el), t = $("#cfTyped", m.el);
-      const check = () => yes.disabled = !(r.value.trim().length >= 3 && (!typed || (t.value.trim().toUpperCase() === typed.toUpperCase())));
-      r.oninput = check; if (t) t.oninput = check;
-      r.focus();
+      const yes = $("#cfYes", m.el), t = $("#cfTyped", m.el);
+      if (t) { t.oninput = () => yes.disabled = t.value.trim().toUpperCase() !== "CONFIRM"; t.onkeydown = e => { if (e.key === "Enter" && !yes.disabled) yes.click(); }; t.focus(); }
+      else yes.focus();
       $("#cfNo", m.el).onclick = () => m.close();
-      yes.onclick = () => { resolve({reason: r.value.trim(), confirm_text: t ? t.value.trim() : ""}); m.close(); };
+      yes.onclick = () => { resolve({confirm_text: t ? t.value.trim() : ""}); m.close(); };
     });
   },
 
@@ -505,9 +507,7 @@ App.views.alarms = {
         <div class="col">${a.crane ? `<button class="btn sm" data-open="${h(a.crane)}">Details</button>` : ""}${extra}${a.acked ? "" : `<button class="btn sm" data-ack="${a.id}">Acknowledge</button>`}</div></div>`;
     }).join("") || `<div class="card empty">✓ No active alarms.</div>`;
     $$("[data-ack]", box).forEach(b => b.onclick = async () => {
-      const note = prompt("Acknowledge. Note (optional):", "");
-      if (note === null) return;
-      await App.api(`/api/alarms/${b.dataset.ack}/ack`, {json: {note}});
+      await App.api(`/api/alarms/${b.dataset.ack}/ack`, {json: {note: ""}});
       App.poll();
     });
     $$("[data-open]", box).forEach(b => b.onclick = () => App.openCrane(b.dataset.open));

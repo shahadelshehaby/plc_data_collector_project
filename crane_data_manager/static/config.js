@@ -1,6 +1,7 @@
 /* Configuration: cranes (manual + Excel import with preview), packet versions
    (editor with live test), collector, notifications, InfluxDB, system.
-   Every critical action goes through App.confirm (summary + reason + typed word). */
+   Stop writing and Remove crane need a typed CONFIRM; other important actions get a
+   simple "Are you sure?"; normal actions just happen. Everything goes to the change log. */
 "use strict";
 const GROUP_COLORS = {"Text": "#888780", "Spreader": "#7F77DD", "Load cells": "#D4537E", "Gantry": "#378ADD", "Trolley": "#5DCAA5", "Hoist": "#EF9F27",
   "Drive currents": "#E24B4A", "Drive voltages": "#A32D2D", "Power cable reel": "#639922", "Neighbour cranes": "#185FA5", "Control": "#5F5E5A",
@@ -20,7 +21,7 @@ const Config = {
   /* ── shared actions (used by drawer, tables, alarms) ── */
   async setWriting(cranes, enabled, all = false) {
     const list = `<ul>${cranes.map(c => `<li><b>${h(c)}</b></li>`).join("")}</ul>`;
-    const typed = enabled ? null : cranes.length === 1 ? cranes[0] : all ? "STOP ALL" : `STOP ${cranes.length}`;
+    const typed = !enabled;
     const r = await App.confirm({
       title: enabled ? `Start writing ${cranes.length > 1 ? cranes.length + " cranes" : cranes[0]}` : `Stop writing ${cranes.length > 1 ? cranes.length + " cranes" : cranes[0]}`,
       danger: !enabled, typed, okText: enabled ? "Start writing" : "Stop writing",
@@ -120,7 +121,7 @@ const Config = {
         if ((c.notes || "") !== v.notes) ch.push("notes");
       }
       const critical = crane && ch.some(x => /port|IP|version|writing|crane ID/.test(x));
-      const r = await App.confirm({title: crane ? `Save changes to ${crane}` : `Add crane ${v.crane}`, danger: critical, typed: critical && !v.enabled ? v.crane : null,
+      const r = await App.confirm({title: crane ? `Save changes to ${crane}` : `Add crane ${v.crane}`, danger: critical, typed: !!(crane && c.enabled && !v.enabled),
         summary: crane ? (ch.length ? `<ul>${ch.map(x => `<li>${x}</li>`).join("")}</ul>Only ${h(v.crane)} is reloaded in the collector.` : "No changes.") :
           `<b>${h(v.crane)}</b> (${h(v.terminal)}) · port <b>${h(v.port)}</b> · IP <b>${h(v.ip)}</b> · ${h(ver.program || "")} ${h(ver.name || "")} · writing ${v.enabled ? "ON" : "OFF"}`});
       if (!r) return;
@@ -129,7 +130,7 @@ const Config = {
   },
 
   async removeCrane(crane) {
-    const r = await App.confirm({title: `Remove ${crane} from the register`, danger: true, typed: crane, okText: "Remove",
+    const r = await App.confirm({title: `Remove ${crane} from the register`, danger: true, typed: true, okText: "Remove",
       summary: `<b>${h(crane)}</b> is removed from the platform and the collector stops listening on its port. Its data already in InfluxDB is <b>not</b> touched.`});
     if (!r) return;
     try { App.applied(await App.api("/api/cranes/" + crane, {method: "DELETE", json: r})); App.poll(); this.refreshView(); } catch (e) { App.err(e); }
@@ -162,7 +163,7 @@ const Config = {
       $("#imApply", m.el).onclick = async () => {
         const skip = $("#imSkip", m.el) ? $("#imSkip", m.el).checked : false;
         if (S.problem && !skip) return App.toast("Fix the problem rows, or tick 'apply the good rows'.", "err");
-        const r = await App.confirm({title: "Apply the Excel import", danger: S.changed + S.removed > 0, typed: S.removed ? "IMPORT" : null, okText: "Apply",
+        const r = await App.confirm({title: "Apply the Excel import", danger: S.removed > 0, okText: "Apply",
           summary: `<ul><li>${S.new} new crane(s)</li><li>${S.changed} changed crane(s)</li>${S.removed ? `<li><b>${S.removed} removed</b></li>` : ""}${S.problem ? `<li>${S.problem} row(s) with problems skipped</li>` : ""}</ul>Only the affected cranes are reloaded in the collector. A backup of the current configuration is saved first.`});
         if (!r) return;
         try { const res = await App.api("/api/cranes/import/apply", {json: {token: pv.token, skip_problems: skip, ...r}}); App.applied(res); m.close(); App.poll(); this.refreshView(); } catch (e) { App.err(e); }
@@ -225,7 +226,7 @@ App.views.config = {
       <div class="small muted" style="margin-top:8px">Refresh reloads the saved settings - only changed cranes restart, all others keep collecting. Restart stops and starts the whole Windows service (a few seconds without collection; queued data is flushed or buffered first). The platform's watchdog also restarts the service by itself if it stops answering.</div>`;
     $("#colRef").onclick = () => Config.refreshCollector();
     $("#colRestart").onclick = async () => {
-      const r = await App.confirm({title: "Restart the collector service", danger: true, typed: "RESTART", okText: "Restart", summary: "All cranes stop collecting for a few seconds while the service restarts."});
+      const r = await App.confirm({title: "Restart the collector service", danger: true, okText: "Restart", summary: "All cranes stop collecting for a few seconds while the service restarts."});
       if (!r) return;
       try { const x = await App.api("/api/service/restart_collector", {json: r}); App.toast(h(x.message), "ok"); } catch (e) { App.err(e); }
     };
@@ -256,8 +257,7 @@ App.views.config = {
       <div class="row"><button class="btn" id="nTest">Test sound</button><button class="btn primary" id="nSave">Save…</button></div></div>`;
     $("#nTest").onclick = () => { const m = App.muted; App.muted = false; App.beep(3); App.muted = m; };
     $("#nSave").onclick = async () => {
-      const r = await App.confirm({title: "Save notification settings", summary: "Notification settings are updated."});
-      if (!r) return;
+      const r = {};
       try { await App.api("/api/settings", {json: {sound: $("#nSound").checked, desktop_popups: $("#nPop").checked, popup_types: $$("[data-t]").filter(x => x.checked).map(x => x.dataset.t), ...r}}); App.meta.sound = $("#nSound").checked; App.toast("Saved", "ok"); } catch (e) { App.err(e); }
     };
   },
@@ -311,14 +311,13 @@ App.views.config = {
         terminals[tr.dataset.t] = {name: v("name"), port_base: +v("port_base"), lanes: v("lanes").toUpperCase().replace(/[^A-Z]/g, ""), lane_counts: lc};
       });
       const yard = {gantry_min: +$("#yMin").value, gantry_max: +$("#yMax").value, trolley_max: +$("#yT").value, hoist_max: +$("#yH").value};
-      const r = await App.confirm({title: "Save terminal settings", summary: "Terminal names, port rules and yard scale are updated."});
-      if (!r) return;
+      const r = {};
       try { await App.api("/api/settings", {json: {terminals, yard, westermo_ip: $("#nW").value.trim(), collector_ip: $("#nC").value.trim(), ...r}}); App.meta = await App.api("/api/meta"); App.toast("Saved", "ok"); } catch (e) { App.err(e); }
     };
     const bk = await App.api("/api/backups");
     $("#syBk").innerHTML = `<table class="t"><tr><th>Saved</th><th>Before</th><th class="num">Cranes</th><th class="num">Versions</th><th></th></tr>${bk.map(x => `<tr><td class="small">${App.fmtTime(x.ts)}</td><td class="small">${h(x.reason)}</td><td class="num">${x.cranes}</td><td class="num">${x.versions}</td><td><button class="btn sm" data-f="${h(x.file)}">Restore…</button></td></tr>`).join("") || `<tr><td class="empty">none yet</td></tr>`}</table>`;
     $$("#syBk [data-f]").forEach(x => x.onclick = async () => {
-      const r = await App.confirm({title: "Restore a configuration backup", danger: true, typed: "RESTORE", okText: "Restore",
+      const r = await App.confirm({title: "Restore a configuration backup", danger: true, okText: "Restore",
         summary: `The crane register and packet versions go back to the state saved at <b>${h(x.closest("tr").cells[0].textContent)}</b>. The current state is backed up first.`});
       if (!r) return;
       try { App.applied(await App.api("/api/backups/restore", {json: {file: x.dataset.f, ...r}})); this.renderSub(); } catch (e) { App.err(e); }
@@ -380,7 +379,7 @@ const Versions = {
     $("#vNew").onclick = () => { this.editor = {base: v, program: v.program, name: this.nextName(v), notes: "", newFields: [], manualSize: null, assign: new Set(v.cranes)}; this.render($("#cfgBody")); };
     $("#vAssign").onclick = () => Config.changeVersion(prompt("Crane IDs to switch to " + v.name + " (comma separated):", "")?.split(",").map(s => s.trim().toUpperCase()).filter(Boolean) || [], v.id);
     $("#vDel").onclick = async () => {
-      const r = await App.confirm({title: `Delete version ${v.name}`, danger: true, typed: v.name, okText: "Delete", summary: "Only possible when no crane runs it and no other version was built from it. Data in InfluxDB is not touched."});
+      const r = await App.confirm({title: `Delete version ${v.name}`, danger: true, okText: "Delete", summary: "Only possible when no crane runs it and no other version was built from it. Data in InfluxDB is not touched."});
       if (!r) return;
       try { await App.api("/api/versions/" + v.id, {method: "DELETE", json: r}); this.selected = null; this.render($("#cfgBody")); App.toast("Deleted", "ok"); } catch (e) { App.err(e); }
     };

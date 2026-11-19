@@ -80,10 +80,14 @@ def body():
 
 
 def need_reason(b):
-    r = str(b.get("reason") or "").strip()
-    if len(r) < 3:
-        raise UserError("Please give a reason (it is saved in the change log).")
-    return r
+    """A reason is optional; every action is still written to the change log."""
+    return str(b.get("reason") or "").strip()[:500] or "via platform"
+
+
+def need_confirm(b):
+    """Only for the two actions that stop data: Stop writing and Remove crane."""
+    if str(b.get("confirm_text") or "").strip().upper() != "CONFIRM":
+        raise UserError("Type CONFIRM to continue.")
 
 
 def collector_status(max_age=0.8):
@@ -364,10 +368,7 @@ def api_crane_enable():
     if not cranes:
         raise UserError("no crane selected")
     if not enabled:
-        expect = cranes[0] if len(cranes) == 1 else "STOP ALL" if b.get("all") else \
-            f"STOP {len(cranes)}"
-        if str(b.get("confirm_text") or "").strip().upper() != expect:
-            raise UserError(f"Type {expect} to confirm.")
+        need_confirm(b)
     registry.set_enabled(cranes, enabled, reason)
     return jsonify({"ok": True, **apply_to_collector(reason)})
 
@@ -389,8 +390,7 @@ def api_crane_delete(crane):
     b = body()
     reason = need_reason(b)
     crane = crane.upper()
-    if str(b.get("confirm_text") or "").strip().upper() != crane:
-        raise UserError(f"Type {crane} to confirm.")
+    need_confirm(b)
     registry.delete(crane, reason)
     return jsonify({"ok": True, **apply_to_collector(reason)})
 
@@ -636,8 +636,6 @@ def api_influx_test():
 def api_restart_collector():
     b = body()
     reason = need_reason(b)
-    if str(b.get("confirm_text") or "").strip().upper() != "RESTART":
-        raise UserError("Type RESTART to confirm.")
     ok, msg = restart_service(C.load_settings()["service_name_collector"])
     db.audit("Restart collector service", "collector", reason, None, {"result": msg})
     if not ok:
@@ -654,8 +652,6 @@ def api_backups():
 def api_backup_restore():
     b = body()
     reason = need_reason(b)
-    if str(b.get("confirm_text") or "").strip().upper() != "RESTORE":
-        raise UserError("Type RESTORE to confirm.")
     registry.restore_backup(b.get("file", ""), reason)
     return jsonify({"ok": True, **apply_to_collector(reason)})
 

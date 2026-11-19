@@ -105,23 +105,17 @@ decoded value of every field), open in Data Explorer, export today.
 port busy, InfluxDB write failure, collector service down, disk almost full. An alarm clears
 itself once the problem is gone (after 2 minutes for crane alarms) and stays in the history.
 
-### Safety on critical actions
+### Confirmations (kept simple)
 
-Stopping writing, changing a version, IP or port, importing, refreshing, restoring and
-restarting all open a confirmation that shows exactly what will change and **requires a
-reason**. Some also require a typed word:
+| Level | Actions | What you do |
+|---|---|---|
+| Type `CONFIRM` | **Stop writing** (one or several cranes), **Remove crane** | type CONFIRM, then click |
+| "Are you sure?" | start writing, change version, save or add a crane, apply an Excel import, create or delete a version, refresh or restart the collector, restore a backup, change the InfluxDB connection, acknowledge all alarms | one click on *Yes* |
+| none | acknowledge one alarm, notification and terminal settings, tests, queries, exports | it just happens |
 
-| Action | Type |
-|---|---|
-| Stop one crane | the crane ID |
-| Stop several cranes | `STOP <n>` |
-| Stop every crane | `STOP ALL` |
-| Restart the collector service | `RESTART` |
-| Restore a backup | `RESTORE` |
-
-The server checks these as well, not only the page. Every change is written to the change
-log with before/after. A configuration backup is saved before each change (last 50 kept,
-one-click restore).
+The server checks the typed CONFIRM too, not only the page. Every change is still written
+to the change log (Configuration → System) with the time and before/after values, and a
+configuration backup is saved before each change (last 50 kept, one-click restore).
 
 **Applying changes:** a confirmed change reloads **only the affected cranes**. An IP, version or
 on/off change has no gap at all. A port change re-opens that one port. *Refresh collector*
