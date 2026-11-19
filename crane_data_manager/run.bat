@@ -15,7 +15,8 @@ echo The services are not installed: starting in test mode (two windows).
 echo For the real installation use install_service.bat (as administrator).
 echo.
 echo Checking Python packages (first run only, may take a minute)...
-python -m pip install -q -r requirements.txt
+python -m pip install -q --disable-pip-version-check --no-index --find-links "%~dp0wheels" -r requirements.txt
+if errorlevel 1 python -m pip install -q --disable-pip-version-check -r requirements.txt
 if not exist "influx_token.txt" if not defined INFLUX_TOKEN (
     echo influx_token.txt is missing. Create it with the InfluxDB token on one line.
     pause & exit /b 1

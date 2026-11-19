@@ -43,7 +43,8 @@ Crane PLCs ──UDP──► Westermo ──► COLLECTOR PC (192.168.100.237)
 
 1. Copy this folder to e.g. `C:\CraneDataManager\`. Avoid the Desktop: the services run
    without a signed-in user.
-2. Install Python 3.10+ ("Add python.exe to PATH").
+2. Install Python 3.10+ ("Add python.exe to PATH"). No internet is needed: the Python packages
+   are in the `wheels` folder and are installed from there.
 3. Create `influx_token.txt` in the folder with the InfluxDB token on one line.
    **Never upload this file to GitHub.** The `.gitignore` already excludes it.
 4. Copy `nssm.exe` into the folder (the one from `terminal2_collector`, or from

@@ -39,7 +39,8 @@ if not exist "%PYW%" set "PYW=%PY%"
 echo Using Python: %PY%
 
 echo Installing / checking Python packages ...
-"%PY%" -m pip install -q -r requirements.txt
+"%PY%" -m pip install -q --disable-pip-version-check --no-index --find-links "%~dp0wheels" -r requirements.txt
+if errorlevel 1 "%PY%" -m pip install -q --disable-pip-version-check -r requirements.txt
 if errorlevel 1 ( echo Package installation failed. & pause & exit /b 1 )
 
 if not exist "influx_token.txt" if not defined INFLUX_TOKEN (

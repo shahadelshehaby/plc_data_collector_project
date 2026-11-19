@@ -764,8 +764,27 @@ def setup_logging():
     root.addHandler(sh)
 
 
+def _another_collector_running():
+    """True when a collector already answers on the control port (e.g. the Windows
+    service is running and someone also started run.bat)."""
+    from . import ctl
+    try:
+        ctl.ping()
+        return True
+    except ctl.CollectorDown:
+        return False
+
+
 def main():
     setup_logging()
+    if _another_collector_running():
+        log.warning("Another collector is already running on this PC (control port %s answers). "
+                    "This copy waits and takes over only if that one stops.",
+                    C.load_settings()["control_port"])
+        print("\nAnother collector is already running on this PC - this window is not needed.\n"
+              "It waits and takes over only if the other one stops. You can close it.\n")
+        while _another_collector_running():
+            time.sleep(10)
     svc = CollectorService()
 
     def _stop(*_):
